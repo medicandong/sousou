@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         手机Edge视频播放助手
+// @name         手机Edge视频播放助手-修复版
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  手机Edge浏览器网页视频播放助手，支持全屏、倍速、画面尺寸
+// @version      1.1
+// @description  手机Edge浏览器网页视频播放助手，修复横屏和全屏控制问题
 // @author       You
 // @match        *://*/*
 // @grant        none
@@ -11,19 +11,18 @@
 (function() {
     'use strict';
 
-    // 配置项 - 针对移动端优化
+    // 配置项
     const CONFIG = {
         playbackRates: [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0],
-        videoSizes: ['填充', '拉伸', '适应', '原始'],
-        touchAreaSize: '44px', // 最小触摸区域
-        buttonSize: '36px', // 按钮大小
-        buttonPosition: '16px' // 按钮边距
+        videoSizes: ['填充', '拉伸', '适应', '原始']
     };
 
     let currentVideo = null;
     let isFullscreen = false;
     let originalStyles = {};
     let isMenuShowing = false;
+    let currentPlaybackRate = 1.0;
+    let currentVideoSize = '适应';
 
     // 创建移动端优化的悬浮按钮
     function createMobileFloatingButton() {
@@ -33,10 +32,10 @@
                 /* 移动端悬浮按钮 */
                 .mobile-video-assistant {
                     position: fixed;
-                    right: ${CONFIG.buttonPosition};
+                    right: 16px;
                     bottom: 80px;
-                    width: ${CONFIG.buttonSize};
-                    height: ${CONFIG.buttonSize};
+                    width: 44px;
+                    height: 44px;
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     border-radius: 50%;
                     display: none;
@@ -52,11 +51,11 @@
                 
                 .mobile-video-assistant::before {
                     content: '';
-                    width: 20px;
-                    height: 20px;
+                    width: 24px;
+                    height: 24px;
                     background: white;
-                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E");
-                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E");
+                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E");
+                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E");
                 }
 
                 /* 移动端底部菜单 */
@@ -73,7 +72,6 @@
                     z-index: 10001;
                     transform: translateY(100%);
                     transition: transform 0.3s ease;
-                    touch-action: pan-y;
                 }
                 
                 .mobile-bottom-menu.show {
@@ -94,8 +92,8 @@
                     width: 24px;
                     height: 24px;
                     background: white;
-                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
                     -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
+                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
                     cursor: pointer;
                 }
                 
@@ -113,7 +111,6 @@
                     color: white;
                     font-size: 14px;
                     cursor: pointer;
-                    touch-action: manipulation;
                     border: 1px solid rgba(255, 255, 255, 0.2);
                     transition: background 0.2s ease;
                 }
@@ -128,32 +125,29 @@
                     bottom: 0;
                     left: 0;
                     right: 0;
-                    background: linear-gradient(transparent, rgba(0,0,0,0.8));
+                    background: linear-gradient(transparent, rgba(0,0,0,0.9));
                     padding: 20px 16px;
                     display: none;
                     align-items: center;
                     justify-content: space-between;
                     z-index: 10002;
                     color: white;
-                    touch-action: manipulation;
                 }
                 
                 .control-group {
                     display: flex;
                     align-items: center;
                     gap: 12px;
-                    flex: 1;
                 }
                 
                 .control-item {
                     background: rgba(255, 255, 255, 0.2);
-                    padding: 8px 12px;
+                    padding: 10px 16px;
                     border-radius: 20px;
-                    font-size: 12px;
-                    min-width: 50px;
+                    font-size: 14px;
+                    min-width: 60px;
                     text-align: center;
                     cursor: pointer;
-                    touch-action: manipulation;
                 }
                 
                 .progress-container {
@@ -163,7 +157,6 @@
                     border-radius: 2px;
                     margin: 0 12px;
                     position: relative;
-                    touch-action: pan-y;
                 }
                 
                 .progress-bar {
@@ -171,17 +164,6 @@
                     background: #4ecdc4;
                     border-radius: 2px;
                     width: 0%;
-                }
-                
-                .progress-handle {
-                    position: absolute;
-                    top: 50%;
-                    transform: translate(-50%, -50%);
-                    width: 16px;
-                    height: 16px;
-                    background: white;
-                    border-radius: 50%;
-                    display: none;
                 }
                 
                 /* 选项面板 */
@@ -216,9 +198,8 @@
                     padding: 12px 8px;
                     text-align: center;
                     color: white;
-                    font-size: 12px;
+                    font-size: 14px;
                     cursor: pointer;
-                    touch-action: manipulation;
                 }
                 
                 .option-item.active {
@@ -241,6 +222,18 @@
                 .overlay.show {
                     display: block;
                 }
+
+                /* 全屏视频样式 */
+                .video-fullscreen {
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 100vw !important;
+                    height: 100vh !important;
+                    z-index: 9998 !important;
+                    background: black !important;
+                    object-fit: contain !important;
+                }
             </style>
             
             <!-- 悬浮按钮 -->
@@ -256,7 +249,6 @@
                     <div class="menu-item" id="mobileFullscreenBtn">全屏播放</div>
                     <div class="menu-item" id="playbackRateBtn">倍速选择</div>
                     <div class="menu-item" id="videoSizeBtn">画面尺寸</div>
-                    <div class="menu-item" id="mobileExitBtn" style="display:none">退出全屏</div>
                 </div>
             </div>
             
@@ -265,12 +257,11 @@
                 <div class="control-group">
                     <div class="progress-container" id="mobileProgressContainer">
                         <div class="progress-bar" id="mobileProgressBar"></div>
-                        <div class="progress-handle" id="progressHandle"></div>
                     </div>
                 </div>
-                <div class="control-group" style="justify-content: flex-end; flex: none; gap: 8px;">
+                <div class="control-group">
                     <div class="control-item" id="mobileRateDisplay">1.0</div>
-                    <div class="control-item" id="mobileSizeDisplay">原始</div>
+                    <div class="control-item" id="mobileSizeDisplay">适应</div>
                     <div class="control-item" id="mobileExitFullscreen">退出</div>
                 </div>
             </div>
@@ -298,50 +289,49 @@
         `;
 
         document.body.appendChild(button);
-        setupMobileEventListeners();
+        setupEventListeners();
     }
 
-    // 设置移动端事件监听
-    function setupMobileEventListeners() {
+    // 设置事件监听
+    function setupEventListeners() {
         const assistant = document.getElementById('mobileVideoAssistant');
         const bottomMenu = document.getElementById('mobileBottomMenu');
         const closeMenuBtn = document.getElementById('closeMenuBtn');
         const fullscreenBtn = document.getElementById('mobileFullscreenBtn');
         const playbackRateBtn = document.getElementById('playbackRateBtn');
         const videoSizeBtn = document.getElementById('videoSizeBtn');
-        const exitBtn = document.getElementById('mobileExitBtn');
         const overlay = document.getElementById('overlay');
         
         // 悬浮按钮点击
         assistant.addEventListener('click', showBottomMenu);
-        assistant.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            showBottomMenu();
-        });
         
         // 关闭菜单
         closeMenuBtn.addEventListener('click', hideBottomMenu);
-        closeMenuBtn.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            hideBottomMenu();
-        });
         
         // 遮罩层点击关闭
         overlay.addEventListener('click', hideAllPanels);
-        overlay.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            hideAllPanels();
-        });
         
         // 菜单项点击
         fullscreenBtn.addEventListener('click', toggleMobileFullscreen);
         playbackRateBtn.addEventListener('click', showPlaybackRatePanel);
         videoSizeBtn.addEventListener('click', showVideoSizePanel);
-        exitBtn.addEventListener('click', exitMobileFullscreen);
+        
+        // 全屏控制栏事件
+        document.getElementById('mobileExitFullscreen').addEventListener('click', exitMobileFullscreen);
+        document.getElementById('mobileRateDisplay').addEventListener('click', showPlaybackRatePanel);
+        document.getElementById('mobileSizeDisplay').addEventListener('click', showVideoSizePanel);
+        
+        // 进度条点击
+        document.getElementById('mobileProgressContainer').addEventListener('click', (e) => {
+            if (currentVideo && isFullscreen) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const percent = (e.clientX - rect.left) / rect.width;
+                currentVideo.currentTime = percent * currentVideo.duration;
+            }
+        });
         
         // 初始化选项面板
         initOptionsPanels();
-        setupFullscreenControls();
     }
 
     // 初始化选项面板
@@ -349,13 +339,13 @@
         // 初始化倍速选项
         const rateOptions = document.getElementById('playbackRateOptions');
         rateOptions.innerHTML = CONFIG.playbackRates.map(rate => `
-            <div class="option-item" data-rate="${rate}">${rate}x</div>
+            <div class="option-item ${rate === 1.0 ? 'active' : ''}" data-rate="${rate}">${rate}x</div>
         `).join('');
         
         // 初始化尺寸选项
         const sizeOptions = document.getElementById('videoSizeOptions');
         sizeOptions.innerHTML = CONFIG.videoSizes.map(size => `
-            <div class="option-item" data-size="${size}">${size}</div>
+            <div class="option-item ${size === '适应' ? 'active' : ''}" data-size="${size}">${size}</div>
         `).join('');
         
         // 倍速选项事件
@@ -363,7 +353,13 @@
             item.addEventListener('click', () => {
                 const rate = parseFloat(item.getAttribute('data-rate'));
                 setPlaybackRate(rate);
+                currentPlaybackRate = rate;
                 document.getElementById('mobileRateDisplay').textContent = rate.toFixed(2);
+                
+                // 更新激活状态
+                rateOptions.querySelectorAll('.option-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
                 hideAllPanels();
             });
         });
@@ -373,7 +369,13 @@
             item.addEventListener('click', () => {
                 const size = item.getAttribute('data-size');
                 setVideoSize(size);
+                currentVideoSize = size;
                 document.getElementById('mobileSizeDisplay').textContent = size;
+                
+                // 更新激活状态
+                sizeOptions.querySelectorAll('.option-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
                 hideAllPanels();
             });
         });
@@ -383,86 +385,11 @@
         document.getElementById('closeSizePanel').addEventListener('click', hideAllPanels);
     }
 
-    // 设置全屏控制
-    function setupFullscreenControls() {
-        const progressContainer = document.getElementById('mobileProgressContainer');
-        const exitFullscreenBtn = document.getElementById('mobileExitFullscreen');
-        
-        // 进度条点击
-        progressContainer.addEventListener('click', (e) => {
-            if (currentVideo) {
-                const rect = progressContainer.getBoundingClientRect();
-                const percent = (e.clientX - rect.left) / rect.width;
-                currentVideo.currentTime = percent * currentVideo.duration;
-            }
-        });
-        
-        // 触摸进度条
-        progressContainer.addEventListener('touchstart', handleProgressTouch);
-        
-        // 退出全屏
-        exitFullscreenBtn.addEventListener('click', exitMobileFullscreen);
-        
-        // 更新进度
-        setInterval(updateMobileProgress, 200);
-    }
-
-    // 处理进度条触摸
-    function handleProgressTouch(e) {
-        e.preventDefault();
-        if (!currentVideo) return;
-        
-        const progressContainer = document.getElementById('mobileProgressContainer');
-        const progressBar = document.getElementById('mobileProgressBar');
-        const handle = document.getElementById('progressHandle');
-        
-        const touch = e.touches[0];
-        const rect = progressContainer.getBoundingClientRect();
-        let percent = (touch.clientX - rect.left) / rect.width;
-        percent = Math.max(0, Math.min(1, percent));
-        
-        currentVideo.currentTime = percent * currentVideo.duration;
-        progressBar.style.width = (percent * 100) + '%';
-        handle.style.display = 'block';
-        handle.style.left = (percent * 100) + '%';
-        
-        const moveHandler = (moveEvent) => {
-            const moveTouch = moveEvent.touches[0];
-            let movePercent = (moveTouch.clientX - rect.left) / rect.width;
-            movePercent = Math.max(0, Math.min(1, movePercent));
-            
-            currentVideo.currentTime = movePercent * currentVideo.duration;
-            progressBar.style.width = (movePercent * 100) + '%';
-            handle.style.left = (movePercent * 100) + '%';
-        };
-        
-        const endHandler = () => {
-            document.removeEventListener('touchmove', moveHandler);
-            document.removeEventListener('touchend', endHandler);
-            setTimeout(() => {
-                handle.style.display = 'none';
-            }, 1000);
-        };
-        
-        document.addEventListener('touchmove', moveHandler);
-        document.addEventListener('touchend', endHandler);
-    }
-
-    // 更新移动端进度条
-    function updateMobileProgress() {
-        if (currentVideo && isFullscreen) {
-            const progress = (currentVideo.currentTime / currentVideo.duration) * 100;
-            document.getElementById('mobileProgressBar').style.width = progress + '%';
-        }
-    }
-
     // 显示底部菜单
     function showBottomMenu() {
         const menu = document.getElementById('mobileBottomMenu');
         const overlay = document.getElementById('overlay');
-        const exitBtn = document.getElementById('mobileExitBtn');
         
-        exitBtn.style.display = isFullscreen ? 'block' : 'none';
         menu.classList.add('show');
         overlay.classList.add('show');
         isMenuShowing = true;
@@ -489,26 +416,48 @@
     // 显示倍速面板
     function showPlaybackRatePanel() {
         document.getElementById('playbackRatePanel').classList.add('show');
+        document.getElementById('overlay').classList.add('show');
     }
 
     // 显示尺寸面板
     function showVideoSizePanel() {
         document.getElementById('videoSizePanel').classList.add('show');
+        document.getElementById('overlay').classList.add('show');
     }
 
     // 切换移动端全屏
     function toggleMobileFullscreen() {
         if (!isFullscreen) {
             enterMobileFullscreen();
-        } else {
-            exitMobileFullscreen();
         }
         hideBottomMenu();
+    }
+
+    // 智能判断横竖屏
+    function shouldUseLandscape(video) {
+        if (!video.videoWidth || !video.videoHeight) return true;
+        
+        const aspectRatio = video.videoWidth / video.videoHeight;
+        
+        // 如果视频是横向的（宽高比 > 1.2），使用横屏
+        if (aspectRatio > 1.2) {
+            return true;
+        }
+        
+        // 如果视频是纵向的（宽高比 < 0.8），使用竖屏
+        if (aspectRatio < 0.8) {
+            return false;
+        }
+        
+        // 接近正方形的视频，根据当前屏幕方向决定
+        return window.innerWidth > window.innerHeight;
     }
 
     // 进入移动端全屏
     function enterMobileFullscreen() {
         if (!currentVideo) return;
+        
+        console.log('进入全屏模式');
         
         // 保存原始样式
         originalStyles = {
@@ -518,17 +467,26 @@
             top: currentVideo.style.top,
             left: currentVideo.style.left,
             zIndex: currentVideo.style.zIndex,
-            objectFit: currentVideo.style.objectFit
+            objectFit: currentVideo.style.objectFit,
+            backgroundColor: currentVideo.style.backgroundColor
         };
         
+        // 添加全屏类
+        currentVideo.classList.add('video-fullscreen');
+        
         // 设置全屏样式
-        currentVideo.style.position = 'fixed';
-        currentVideo.style.width = '100vw';
-        currentVideo.style.height = '100vh';
-        currentVideo.style.top = '0';
-        currentVideo.style.left = '0';
-        currentVideo.style.zIndex = '9998';
-        currentVideo.style.objectFit = 'contain';
+        Object.assign(currentVideo.style, {
+            position: 'fixed',
+            top: '0',
+            left: '0',
+            width: '100vw',
+            height: '100vh',
+            zIndex: '9998',
+            backgroundColor: '#000',
+            objectFit: currentVideoSize === '填充' ? 'cover' : 
+                      currentVideoSize === '拉伸' ? 'fill' :
+                      currentVideoSize === '适应' ? 'contain' : 'none'
+        });
         
         // 显示控制栏，隐藏悬浮按钮
         document.getElementById('mobileFullscreenControls').style.display = 'flex';
@@ -536,33 +494,85 @@
         
         isFullscreen = true;
         
-        // 自动横屏（如果视频是横向的）
-        if (currentVideo.videoWidth > currentVideo.videoHeight) {
+        // 智能横竖屏处理
+        if (shouldUseLandscape(currentVideo)) {
+            console.log('视频为横向，尝试横屏显示');
             try {
-                screen.orientation.lock('landscape');
+                // 尝试横屏锁定
+                if (screen.orientation && screen.orientation.lock) {
+                    screen.orientation.lock('landscape').catch(e => {
+                        console.log('横屏锁定失败，使用CSS横屏:', e);
+                        forceLandscapeWithCSS();
+                    });
+                } else {
+                    forceLandscapeWithCSS();
+                }
             } catch (e) {
-                console.log('横屏锁定不支持');
+                console.log('横屏处理失败:', e);
+                forceLandscapeWithCSS();
             }
+        } else {
+            console.log('视频为纵向，保持竖屏显示');
         }
+        
+        // 开始更新进度
+        updateProgress();
+    }
+
+    // 使用CSS强制横屏
+    function forceLandscapeWithCSS() {
+        const videoContainer = document.createElement('div');
+        videoContainer.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vh;
+            height: 100vw;
+            transform: rotate(90deg) translate(0, -100%);
+            transform-origin: 0 0;
+            z-index: 9997;
+            background: black;
+        `;
+        
+        document.body.appendChild(videoContainer);
+        videoContainer.appendChild(currentVideo);
+        
+        // 保存容器引用以便退出时恢复
+        currentVideo._fullscreenContainer = videoContainer;
     }
 
     // 退出移动端全屏
     function exitMobileFullscreen() {
         if (!currentVideo) return;
         
+        console.log('退出全屏模式');
+        
+        // 移除全屏类
+        currentVideo.classList.remove('video-fullscreen');
+        
         // 恢复原始样式
         Object.keys(originalStyles).forEach(prop => {
             currentVideo.style[prop] = originalStyles[prop];
         });
         
-        // 隐藏控制栏
+        // 如果使用了CSS横屏，恢复DOM结构
+        if (currentVideo._fullscreenContainer) {
+            document.body.appendChild(currentVideo);
+            currentVideo._fullscreenContainer.remove();
+            delete currentVideo._fullscreenContainer;
+        }
+        
+        // 隐藏控制栏，显示悬浮按钮
         document.getElementById('mobileFullscreenControls').style.display = 'none';
+        document.getElementById('mobileVideoAssistant').style.display = 'flex';
         
         // 解锁屏幕方向
         try {
-            screen.orientation.unlock();
+            if (screen.orientation && screen.orientation.unlock) {
+                screen.orientation.unlock();
+            }
         } catch (e) {
-            console.log('屏幕方向解锁失败');
+            console.log('屏幕方向解锁失败:', e);
         }
         
         isFullscreen = false;
@@ -573,26 +583,41 @@
     function setPlaybackRate(rate) {
         if (currentVideo) {
             currentVideo.playbackRate = rate;
+            console.log('设置播放倍速:', rate);
         }
     }
 
     // 设置视频尺寸
     function setVideoSize(size) {
-        if (currentVideo) {
+        if (currentVideo && isFullscreen) {
+            let objectFitValue;
             switch (size) {
                 case '填充':
-                    currentVideo.style.objectFit = 'cover';
+                    objectFitValue = 'cover';
                     break;
                 case '拉伸':
-                    currentVideo.style.objectFit = 'fill';
+                    objectFitValue = 'fill';
                     break;
                 case '适应':
-                    currentVideo.style.objectFit = 'contain';
+                    objectFitValue = 'contain';
                     break;
                 case '原始':
-                    currentVideo.style.objectFit = 'none';
+                    objectFitValue = 'none';
                     break;
             }
+            currentVideo.style.objectFit = objectFitValue;
+            console.log('设置画面尺寸:', size, objectFitValue);
+        }
+    }
+
+    // 更新进度条
+    function updateProgress() {
+        if (currentVideo && isFullscreen) {
+            const progress = (currentVideo.currentTime / currentVideo.duration) * 100;
+            document.getElementById('mobileProgressBar').style.width = progress + '%';
+            
+            // 继续更新
+            requestAnimationFrame(updateProgress);
         }
     }
 
@@ -607,6 +632,7 @@
                 video.addEventListener('play', () => {
                     currentVideo = video;
                     document.getElementById('mobileVideoAssistant').style.display = 'flex';
+                    console.log('检测到视频播放:', video);
                 });
                 
                 video.addEventListener('pause', () => {
@@ -627,28 +653,23 @@
 
     // 初始化
     function init() {
-        createMobileFloatingButton();
-        
-        // 初始检测视频
-        detectVideo();
-        
-        // 定时检测新视频
-        setInterval(detectVideo, 3000);
-        
-        // 监听页面变化
-        const observer = new MutationObserver(detectVideo);
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-        
-        // 点击空白处隐藏菜单
-        document.addEventListener('touchstart', (e) => {
-            if (isMenuShowing && !e.target.closest('.mobile-bottom-menu') && 
-                !e.target.closest('.mobile-video-assistant')) {
-                hideAllPanels();
-            }
-        });
+        // 等待页面加载完成
+        setTimeout(() => {
+            createMobileFloatingButton();
+            detectVideo();
+            
+            // 定时检测新视频
+            setInterval(detectVideo, 2000);
+            
+            // 监听页面变化
+            const observer = new MutationObserver(detectVideo);
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+            
+            console.log('手机Edge视频播放助手已加载');
+        }, 1000);
     }
 
     // 页面加载完成后初始化
