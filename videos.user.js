@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         手机Edge视频播放助手-修复版
+// @name         手机Edge视频播放助手-真全屏版
 // @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  手机Edge浏览器网页视频播放助手，修复横屏和全屏控制问题
+// @version      1.2
+// @description  手机Edge浏览器网页视频播放助手，实现真正的全屏功能
 // @author       You
 // @match        *://*/*
 // @grant        none
@@ -11,7 +11,6 @@
 (function() {
     'use strict';
 
-    // 配置项
     const CONFIG = {
         playbackRates: [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0],
         videoSizes: ['填充', '拉伸', '适应', '原始']
@@ -20,7 +19,6 @@
     let currentVideo = null;
     let isFullscreen = false;
     let originalStyles = {};
-    let isMenuShowing = false;
     let currentPlaybackRate = 1.0;
     let currentVideoSize = '适应';
 
@@ -29,7 +27,6 @@
         const button = document.createElement('div');
         button.innerHTML = `
             <style>
-                /* 移动端悬浮按钮 */
                 .mobile-video-assistant {
                     position: fixed;
                     right: 16px;
@@ -46,7 +43,6 @@
                     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                     border: 2px solid white;
                     touch-action: manipulation;
-                    user-select: none;
                 }
                 
                 .mobile-video-assistant::before {
@@ -54,11 +50,10 @@
                     width: 24px;
                     height: 24px;
                     background: white;
-                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E");
-                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z'/%3E%3C/svg%3E");
+                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
+                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
                 }
 
-                /* 移动端底部菜单 */
                 .mobile-bottom-menu {
                     position: fixed;
                     bottom: 0;
@@ -119,7 +114,6 @@
                     background: rgba(255, 255, 255, 0.2);
                 }
                 
-                /* 全屏控制栏 */
                 .mobile-fullscreen-controls {
                     position: fixed;
                     bottom: 0;
@@ -166,7 +160,6 @@
                     width: 0%;
                 }
                 
-                /* 选项面板 */
                 .options-panel {
                     position: fixed;
                     bottom: 0;
@@ -207,7 +200,6 @@
                     color: black;
                 }
                 
-                /* 遮罩层 */
                 .overlay {
                     position: fixed;
                     top: 0;
@@ -223,8 +215,8 @@
                     display: block;
                 }
 
-                /* 全屏视频样式 */
-                .video-fullscreen {
+                /* 真正的全屏样式 */
+                .video-fullscreen-mode {
                     position: fixed !important;
                     top: 0 !important;
                     left: 0 !important;
@@ -234,12 +226,31 @@
                     background: black !important;
                     object-fit: contain !important;
                 }
+                
+                .fullscreen-backdrop {
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 100vw !important;
+                    height: 100vh !important;
+                    background: black !important;
+                    z-index: 9997 !important;
+                }
+                
+                /* 隐藏页面其他元素 */
+                body.video-fullscreen-active * {
+                    visibility: hidden !important;
+                }
+                
+                body.video-fullscreen-active .video-fullscreen-mode,
+                body.video-fullscreen-active .fullscreen-backdrop,
+                body.video-fullscreen-active .mobile-fullscreen-controls {
+                    visibility: visible !important;
+                }
             </style>
             
-            <!-- 悬浮按钮 -->
             <div class="mobile-video-assistant" id="mobileVideoAssistant"></div>
             
-            <!-- 底部菜单 -->
             <div class="mobile-bottom-menu" id="mobileBottomMenu">
                 <div class="menu-header">
                     <span>播放设置</span>
@@ -252,7 +263,6 @@
                 </div>
             </div>
             
-            <!-- 全屏控制栏 -->
             <div class="mobile-fullscreen-controls" id="mobileFullscreenControls">
                 <div class="control-group">
                     <div class="progress-container" id="mobileProgressContainer">
@@ -266,7 +276,6 @@
                 </div>
             </div>
             
-            <!-- 倍速选项面板 -->
             <div class="options-panel" id="playbackRatePanel">
                 <div class="menu-header">
                     <span>选择播放倍速</span>
@@ -275,7 +284,6 @@
                 <div class="options-grid" id="playbackRateOptions"></div>
             </div>
             
-            <!-- 尺寸选项面板 -->
             <div class="options-panel" id="videoSizePanel">
                 <div class="menu-header">
                     <span>选择画面尺寸</span>
@@ -284,7 +292,6 @@
                 <div class="options-grid" id="videoSizeOptions"></div>
             </div>
             
-            <!-- 遮罩层 -->
             <div class="overlay" id="overlay"></div>
         `;
 
@@ -292,36 +299,25 @@
         setupEventListeners();
     }
 
-    // 设置事件监听
     function setupEventListeners() {
         const assistant = document.getElementById('mobileVideoAssistant');
-        const bottomMenu = document.getElementById('mobileBottomMenu');
         const closeMenuBtn = document.getElementById('closeMenuBtn');
         const fullscreenBtn = document.getElementById('mobileFullscreenBtn');
         const playbackRateBtn = document.getElementById('playbackRateBtn');
         const videoSizeBtn = document.getElementById('videoSizeBtn');
         const overlay = document.getElementById('overlay');
         
-        // 悬浮按钮点击
         assistant.addEventListener('click', showBottomMenu);
-        
-        // 关闭菜单
         closeMenuBtn.addEventListener('click', hideBottomMenu);
-        
-        // 遮罩层点击关闭
         overlay.addEventListener('click', hideAllPanels);
-        
-        // 菜单项点击
         fullscreenBtn.addEventListener('click', toggleMobileFullscreen);
         playbackRateBtn.addEventListener('click', showPlaybackRatePanel);
         videoSizeBtn.addEventListener('click', showVideoSizePanel);
         
-        // 全屏控制栏事件
         document.getElementById('mobileExitFullscreen').addEventListener('click', exitMobileFullscreen);
         document.getElementById('mobileRateDisplay').addEventListener('click', showPlaybackRatePanel);
         document.getElementById('mobileSizeDisplay').addEventListener('click', showVideoSizePanel);
         
-        // 进度条点击
         document.getElementById('mobileProgressContainer').addEventListener('click', (e) => {
             if (currentVideo && isFullscreen) {
                 const rect = e.currentTarget.getBoundingClientRect();
@@ -330,82 +326,58 @@
             }
         });
         
-        // 初始化选项面板
         initOptionsPanels();
     }
 
-    // 初始化选项面板
     function initOptionsPanels() {
-        // 初始化倍速选项
         const rateOptions = document.getElementById('playbackRateOptions');
         rateOptions.innerHTML = CONFIG.playbackRates.map(rate => `
             <div class="option-item ${rate === 1.0 ? 'active' : ''}" data-rate="${rate}">${rate}x</div>
         `).join('');
         
-        // 初始化尺寸选项
         const sizeOptions = document.getElementById('videoSizeOptions');
         sizeOptions.innerHTML = CONFIG.videoSizes.map(size => `
             <div class="option-item ${size === '适应' ? 'active' : ''}" data-size="${size}">${size}</div>
         `).join('');
         
-        // 倍速选项事件
         rateOptions.querySelectorAll('.option-item').forEach(item => {
             item.addEventListener('click', () => {
                 const rate = parseFloat(item.getAttribute('data-rate'));
                 setPlaybackRate(rate);
                 currentPlaybackRate = rate;
                 document.getElementById('mobileRateDisplay').textContent = rate.toFixed(2);
-                
-                // 更新激活状态
                 rateOptions.querySelectorAll('.option-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                
                 hideAllPanels();
             });
         });
         
-        // 尺寸选项事件
         sizeOptions.querySelectorAll('.option-item').forEach(item => {
             item.addEventListener('click', () => {
                 const size = item.getAttribute('data-size');
                 setVideoSize(size);
                 currentVideoSize = size;
                 document.getElementById('mobileSizeDisplay').textContent = size;
-                
-                // 更新激活状态
                 sizeOptions.querySelectorAll('.option-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                
                 hideAllPanels();
             });
         });
         
-        // 关闭按钮事件
         document.getElementById('closeRatePanel').addEventListener('click', hideAllPanels);
         document.getElementById('closeSizePanel').addEventListener('click', hideAllPanels);
     }
 
-    // 显示底部菜单
     function showBottomMenu() {
-        const menu = document.getElementById('mobileBottomMenu');
-        const overlay = document.getElementById('overlay');
-        
-        menu.classList.add('show');
-        overlay.classList.add('show');
-        isMenuShowing = true;
+        document.getElementById('mobileBottomMenu').classList.add('show');
+        document.getElementById('overlay').classList.add('show');
     }
 
-    // 隐藏底部菜单
     function hideBottomMenu() {
-        const menu = document.getElementById('mobileBottomMenu');
-        const overlay = document.getElementById('overlay');
-        
-        menu.classList.remove('show');
-        overlay.classList.remove('show');
-        isMenuShowing = false;
+        document.getElementById('mobileBottomMenu').classList.remove('show');
+        document.getElementById('overlay').classList.remove('show');
     }
 
-    // 隐藏所有面板
     function hideAllPanels() {
         hideBottomMenu();
         document.getElementById('playbackRatePanel').classList.remove('show');
@@ -413,19 +385,16 @@
         document.getElementById('overlay').classList.remove('show');
     }
 
-    // 显示倍速面板
     function showPlaybackRatePanel() {
         document.getElementById('playbackRatePanel').classList.add('show');
         document.getElementById('overlay').classList.add('show');
     }
 
-    // 显示尺寸面板
     function showVideoSizePanel() {
         document.getElementById('videoSizePanel').classList.add('show');
         document.getElementById('overlay').classList.add('show');
     }
 
-    // 切换移动端全屏
     function toggleMobileFullscreen() {
         if (!isFullscreen) {
             enterMobileFullscreen();
@@ -436,30 +405,17 @@
     // 智能判断横竖屏
     function shouldUseLandscape(video) {
         if (!video.videoWidth || !video.videoHeight) return true;
-        
         const aspectRatio = video.videoWidth / video.videoHeight;
-        
-        // 如果视频是横向的（宽高比 > 1.2），使用横屏
-        if (aspectRatio > 1.2) {
-            return true;
-        }
-        
-        // 如果视频是纵向的（宽高比 < 0.8），使用竖屏
-        if (aspectRatio < 0.8) {
-            return false;
-        }
-        
-        // 接近正方形的视频，根据当前屏幕方向决定
-        return window.innerWidth > window.innerHeight;
+        return aspectRatio > 1.2;
     }
 
-    // 进入移动端全屏
+    // 进入真正的全屏模式
     function enterMobileFullscreen() {
         if (!currentVideo) return;
         
-        console.log('进入全屏模式');
+        console.log('进入真正全屏模式');
         
-        // 保存原始样式
+        // 保存原始状态
         originalStyles = {
             position: currentVideo.style.position,
             width: currentVideo.style.width,
@@ -468,13 +424,19 @@
             left: currentVideo.style.left,
             zIndex: currentVideo.style.zIndex,
             objectFit: currentVideo.style.objectFit,
-            backgroundColor: currentVideo.style.backgroundColor
+            parent: currentVideo.parentElement
         };
         
-        // 添加全屏类
-        currentVideo.classList.add('video-fullscreen');
+        // 创建全屏背景
+        const backdrop = document.createElement('div');
+        backdrop.className = 'fullscreen-backdrop';
+        document.body.appendChild(backdrop);
         
-        // 设置全屏样式
+        // 将视频移动到body最顶层
+        document.body.appendChild(currentVideo);
+        
+        // 应用全屏样式
+        currentVideo.classList.add('video-fullscreen-mode');
         Object.assign(currentVideo.style, {
             position: 'fixed',
             top: '0',
@@ -483,90 +445,79 @@
             height: '100vh',
             zIndex: '9998',
             backgroundColor: '#000',
-            objectFit: currentVideoSize === '填充' ? 'cover' : 
-                      currentVideoSize === '拉伸' ? 'fill' :
-                      currentVideoSize === '适应' ? 'contain' : 'none'
+            objectFit: getObjectFitValue(currentVideoSize)
         });
         
-        // 显示控制栏，隐藏悬浮按钮
+        // 隐藏页面其他内容
+        document.body.classList.add('video-fullscreen-active');
+        
+        // 显示控制栏
         document.getElementById('mobileFullscreenControls').style.display = 'flex';
         document.getElementById('mobileVideoAssistant').style.display = 'none';
         
         isFullscreen = true;
         
-        // 智能横竖屏处理
+        // 智能横屏处理
         if (shouldUseLandscape(currentVideo)) {
             console.log('视频为横向，尝试横屏显示');
-            try {
-                // 尝试横屏锁定
-                if (screen.orientation && screen.orientation.lock) {
-                    screen.orientation.lock('landscape').catch(e => {
-                        console.log('横屏锁定失败，使用CSS横屏:', e);
-                        forceLandscapeWithCSS();
-                    });
-                } else {
-                    forceLandscapeWithCSS();
-                }
-            } catch (e) {
-                console.log('横屏处理失败:', e);
-                forceLandscapeWithCSS();
-            }
-        } else {
-            console.log('视频为纵向，保持竖屏显示');
+            lockScreenOrientation('landscape');
         }
         
         // 开始更新进度
         updateProgress();
     }
 
-    // 使用CSS强制横屏
-    function forceLandscapeWithCSS() {
-        const videoContainer = document.createElement('div');
-        videoContainer.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vh;
-            height: 100vw;
-            transform: rotate(90deg) translate(0, -100%);
-            transform-origin: 0 0;
-            z-index: 9997;
-            background: black;
-        `;
-        
-        document.body.appendChild(videoContainer);
-        videoContainer.appendChild(currentVideo);
-        
-        // 保存容器引用以便退出时恢复
-        currentVideo._fullscreenContainer = videoContainer;
-    }
-
-    // 退出移动端全屏
+    // 退出全屏
     function exitMobileFullscreen() {
         if (!currentVideo) return;
         
         console.log('退出全屏模式');
         
-        // 移除全屏类
-        currentVideo.classList.remove('video-fullscreen');
+        // 移除全屏样式
+        currentVideo.classList.remove('video-fullscreen-mode');
+        document.body.classList.remove('video-fullscreen-active');
+        
+        // 移除全屏背景
+        const backdrop = document.querySelector('.fullscreen-backdrop');
+        if (backdrop) backdrop.remove();
+        
+        // 恢复视频到原始位置
+        if (originalStyles.parent) {
+            originalStyles.parent.appendChild(currentVideo);
+        }
         
         // 恢复原始样式
         Object.keys(originalStyles).forEach(prop => {
-            currentVideo.style[prop] = originalStyles[prop];
+            if (prop !== 'parent') {
+                currentVideo.style[prop] = originalStyles[prop];
+            }
         });
         
-        // 如果使用了CSS横屏，恢复DOM结构
-        if (currentVideo._fullscreenContainer) {
-            document.body.appendChild(currentVideo);
-            currentVideo._fullscreenContainer.remove();
-            delete currentVideo._fullscreenContainer;
-        }
-        
-        // 隐藏控制栏，显示悬浮按钮
+        // 隐藏控制栏
         document.getElementById('mobileFullscreenControls').style.display = 'none';
         document.getElementById('mobileVideoAssistant').style.display = 'flex';
         
         // 解锁屏幕方向
+        unlockScreenOrientation();
+        
+        isFullscreen = false;
+    }
+
+    // 锁定屏幕方向
+    function lockScreenOrientation(orientation) {
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                screen.orientation.lock(orientation).catch(e => {
+                    console.log('屏幕方向锁定失败:', e);
+                });
+            }
+        } catch (e) {
+            console.log('屏幕方向锁定异常:', e);
+        }
+    }
+
+    // 解锁屏幕方向
+    function unlockScreenOrientation() {
         try {
             if (screen.orientation && screen.orientation.unlock) {
                 screen.orientation.unlock();
@@ -574,39 +525,30 @@
         } catch (e) {
             console.log('屏幕方向解锁失败:', e);
         }
-        
-        isFullscreen = false;
-        hideAllPanels();
+    }
+
+    // 获取object-fit值
+    function getObjectFitValue(size) {
+        switch (size) {
+            case '填充': return 'cover';
+            case '拉伸': return 'fill';
+            case '适应': return 'contain';
+            case '原始': return 'none';
+            default: return 'contain';
+        }
     }
 
     // 设置播放倍速
     function setPlaybackRate(rate) {
         if (currentVideo) {
             currentVideo.playbackRate = rate;
-            console.log('设置播放倍速:', rate);
         }
     }
 
     // 设置视频尺寸
     function setVideoSize(size) {
         if (currentVideo && isFullscreen) {
-            let objectFitValue;
-            switch (size) {
-                case '填充':
-                    objectFitValue = 'cover';
-                    break;
-                case '拉伸':
-                    objectFitValue = 'fill';
-                    break;
-                case '适应':
-                    objectFitValue = 'contain';
-                    break;
-                case '原始':
-                    objectFitValue = 'none';
-                    break;
-            }
-            currentVideo.style.objectFit = objectFitValue;
-            console.log('设置画面尺寸:', size, objectFitValue);
+            currentVideo.style.objectFit = getObjectFitValue(size);
         }
     }
 
@@ -615,8 +557,6 @@
         if (currentVideo && isFullscreen) {
             const progress = (currentVideo.currentTime / currentVideo.duration) * 100;
             document.getElementById('mobileProgressBar').style.width = progress + '%';
-            
-            // 继续更新
             requestAnimationFrame(updateProgress);
         }
     }
@@ -632,7 +572,6 @@
                 video.addEventListener('play', () => {
                     currentVideo = video;
                     document.getElementById('mobileVideoAssistant').style.display = 'flex';
-                    console.log('检测到视频播放:', video);
                 });
                 
                 video.addEventListener('pause', () => {
@@ -653,26 +592,22 @@
 
     // 初始化
     function init() {
-        // 等待页面加载完成
         setTimeout(() => {
             createMobileFloatingButton();
             detectVideo();
             
-            // 定时检测新视频
             setInterval(detectVideo, 2000);
             
-            // 监听页面变化
             const observer = new MutationObserver(detectVideo);
             observer.observe(document.body, {
                 childList: true,
                 subtree: true
             });
             
-            console.log('手机Edge视频播放助手已加载');
+            console.log('手机Edge视频播放助手-真全屏版已加载');
         }, 1000);
     }
 
-    // 页面加载完成后初始化
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
