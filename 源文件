@@ -429,31 +429,75 @@
     // 检测页面中的视频元素（定期检查，处理动态加载的视频）
     function detectVideos() {
         const videos = getVideoElements();
+        console.log(`检测到 ${videos.length} 个视频元素`);
+        
         if (videos.length > 0) {
             // 如果有视频元素，确保悬浮按钮可用
             const btn = document.querySelector('.video-assistant-btn');
             if (btn) {
                 // 检查是否有视频正在播放
                 const anyPlaying = Array.from(videos).some(video => !video.paused);
+                console.log(`有视频正在播放: ${anyPlaying}`);
+                
                 if (anyPlaying) {
                     showFloatingButton();
+                    console.log('显示悬浮按钮');
+                } else {
+                    // 如果有视频但未播放，也显示按钮（方便用户操作）
+                    const hasVideo = videos.length > 0;
+                    if (hasVideo) {
+                        showFloatingButton();
+                        console.log('检测到视频，显示悬浮按钮');
+                    } else {
+                        hideFloatingButton();
+                    }
                 }
+            } else {
+                console.log('悬浮按钮未找到，重新创建...');
+                createFloatingButton();
             }
+        } else {
+            console.log('未检测到视频元素');
+            hideFloatingButton();
         }
     }
 
     // 主初始化函数
     function init() {
+        console.log('网页视频助手开始初始化...');
+        
+        // 确保页面有body元素
+        if (!document.body) {
+            console.log('等待页面body加载...');
+            setTimeout(init, 100);
+            return;
+        }
+        
         // 创建悬浮按钮
-        createFloatingButton();
+        const button = createFloatingButton();
+        if (button) {
+            console.log('悬浮按钮创建成功');
+            console.log('按钮位置：右下角 (right: 20px, bottom: 20px)');
+            console.log('按钮初始状态：隐藏 (opacity: 0)，当视频播放时会显示');
+        } else {
+            console.error('悬浮按钮创建失败');
+        }
         
         // 初始化事件监听
         initEventListeners();
+        
+        // 立即检测一次视频元素
+        detectVideos();
         
         // 定期检测视频元素（处理动态加载的视频）
         setInterval(detectVideos, 2000);
         
         console.log('网页视频助手已加载 - 支持所有HTML5视频格式');
+        console.log('调试信息：请打开浏览器控制台查看详细日志');
+        console.log('测试步骤：');
+        console.log('1. 打开包含视频的网页');
+        console.log('2. 播放视频');
+        console.log('3. 检查右下角是否出现四叶草按钮');
     }
 
     // 等待DOM加载完成后初始化
