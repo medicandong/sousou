@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         手机端快捷搜索引擎助手
+// @name         手机端快捷搜索助手（谷歌通配 / 无百度）
 // @namespace    https://github.com/yourname
-// @version      1.0.0
+// @version      1.1.0
 // @description  搜索框下方快速切换引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
@@ -14,21 +14,28 @@
 (function () {
   'use strict';
 
-  /* ============ 1.  内置引擎数据 ============ */
+  /* ========== 1. 引擎数据（去掉百度） ========== */
   const ENGINE_DB = [
     {
       key: 'google',
       name: 'Google',
       logo: 'https://www.google.com/favicon.ico',
       searchUrl: 'https://www.google.com/search?q={q}',
-      mirrors: ['https://www.google.com/search?q={q}', 'https://www.google.com.hk/search?q={q}', 'https://www.google.co.jp/search?q={q}']
+      mirrors: [                       // 可继续加更多镜像
+        'https://www.google.com/search?q={q}',
+        'https://www.google.com.hk/search?q={q}',
+        'https://www.google.co.jp/search?q={q}'
+      ]
     },
     {
       key: 'bing',
       name: 'Bing',
       logo: 'https://www.bing.com/favicon.ico',
       searchUrl: 'https://www.bing.com/search?q={q}',
-      mirrors: ['https://www.bing.com/search?q={q}', 'https://cn.bing.com/search?q={q}']
+      mirrors: [
+        'https://www.bing.com/search?q={q}',
+        'https://cn.bing.com/search?q={q}'
+      ]
     },
     {
       key: 'duckduckgo',
@@ -41,93 +48,67 @@
       name: 'Yandex',
       logo: 'https://yandex.com/favicon.ico',
       searchUrl: 'https://yandex.com/search/?text={q}'
-    },
-    {
-      key: 'baidu',
-      name: '百度',
-      logo: 'https://www.baidu.com/favicon.ico',
-      searchUrl: 'https://www.baidu.com/s?wd={q}'
     }
   ];
 
-  /* ============ 2.  工具函数 ============ */
-  const $ = (s, el) => (el || document).querySelector(s);
+  /* ========== 2. 工具函数 ========== */
+  const $  = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => [...(el || document).querySelectorAll(s)];
 
-  /* 获取当前所在搜索引擎 */
+  /* 识别当前引擎：谷歌通配任意后缀 */
   function detectCurrentEngine() {
-    const host = location.hostname;
-    if (/google\./.test(host)) return 'google';
-    if (/bing\./.test(host)) return 'bing';
-    if (/duckduckgo\./.test(host)) return 'duckduckgo';
-    if (/yandex\./.test(host)) return 'yandex';
-    if (/baidu\./.test(host)) return 'baidu';
+    const h = location.hostname;
+    if (/^www\.google\./.test(h)) return 'google';      // 任意 google.xx
+    if (/bing\.(com|cn)/.test(h)) return 'bing';
+    if (/duckduckgo\.com/.test(h)) return 'duckduckgo';
+    if (/yandex\.(com|ru)/.test(h)) return 'yandex';
     return '';
   }
 
-  /* 获取搜索框关键字 */
+  /* 取关键词 */
   function getQuery() {
-    const q = new URLSearchParams(location.search).get('q') || new URLSearchParams(location.search).get('wd') || '';
+    const q = new URLSearchParams(location.search).get('q') ||
+              new URLSearchParams(location.search).get('wd') || '';
     return decodeURIComponent(q);
   }
 
   /* 高亮关键词 */
   function highlightKeyword(keyword) {
     if (!keyword) return;
-    const walk = (node) => {
-      if (node.nodeType === 3) {
-        const txt = node.textContent;
-        const reg = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-        if (reg.test(txt)) {
+    const reg = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    const walk = (n) => {
+      if (n.nodeType === 3) {
+        if (reg.test(n.textContent)) {
           const span = document.createElement('span');
-          span.innerHTML = txt.replace(reg, '<mark style="background:#ffeb3b;color:#000;">$1</mark>');
-          node.parentNode.replaceChild(span, node);
+          span.innerHTML = n.textContent.replace(reg, '<mark style="background:#ffeb3b;color:#000;">$1</mark>');
+          n.parentNode.replaceChild(span, n);
         }
       } else {
-        node.childNodes.forEach(walk);
+        n.childNodes.forEach(walk);
       }
     };
     $$('body *').forEach(el => walk(el));
   }
 
-  /* ============ 3.  面板样式 ============ */
+  /* ========== 3. 样式 ========== */
   const STYLE = `
   #quickEngineBar{
-    position:relative;
-    margin:8px 0 12px;
-    display:flex;
-    gap:10px;
-    overflow-x:auto;
-    -webkit-overflow-scrolling:touch;
-    padding-bottom:4px;
+    position:relative;margin:8px 0 12px;display:flex;gap:10px;
+    overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;
   }
   #quickEngineBar::-webkit-scrollbar{height:4px;}
   #quickEngineBar::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px;}
   .qe-btn{
-    flex:0 0 auto;
-    display:flex;align-items:center;
-    background:#fff;
-    border:1px solid #dfe1e5;
-    border-radius:20px;
-    padding:6px 10px;
-    font-size:14px;
-    color:#202124;
-    text-decoration:none;
-    white-space:nowrap;
+    flex:0 0 auto;display:flex;align-items:center;background:#fff;
+    border:1px solid #dfe1e5;border-radius:20px;padding:6px 10px;
+    font-size:14px;color:#202124;text-decoration:none;white-space:nowrap;
   }
   .qe-btn img{width:16px;height:16px;margin-right:6px;}
   .qe-btn:active{background:#f1f3f4;}
   #qeSettings{
-    position:fixed;
-    top:10px;right:10px;z-index:9999;
-    background:#fff;
-    border:1px solid #dadce0;
-    border-radius:8px;
-    padding:12px;
-    width:260px;
-    box-shadow:0 4px 12px rgba(0,0,0,.15);
-    font-size:14px;
-    display:none;
+    position:fixed;top:10px;right:10px;z-index:9999;background:#fff;
+    border:1px solid #dadce0;border-radius:8px;padding:12px;width:260px;
+    box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:14px;display:none;
   }
   #qeSettings h4{margin:0 0 8px;font-size:16px;}
   #qeSettings label{display:block;margin-bottom:6px;}
@@ -135,39 +116,43 @@
   #qeSettings button{margin-top:8px;margin-right:6px;}
   `;
 
-  /* ============ 4.  核心逻辑 ============ */
+  /* ========== 4. 构建快捷条 ========== */
   function buildBar() {
+    const kw = getQuery();
+    if (!kw) return;
     const current = detectCurrentEngine();
-    const keyword = getQuery();
-    if (!keyword) return;
-
-    const selectedKeys = GM_getValue('selectedEngines', ['google', 'yandex', 'duckduckgo']);
+    const selectedKeys = GM_getValue('selectedEngines', ['google', 'bing', 'yandex']);
     const customEngines = GM_getValue('customEngines', []);
     const all = [...ENGINE_DB, ...customEngines];
 
     const bar = document.createElement('div');
     bar.id = 'quickEngineBar';
     all.filter(e => selectedKeys.includes(e.key) && e.key !== current)
-      .forEach(e => {
-        const url = (e.mirrors ? e.mirrors[GM_getValue('mirror_' + e.key, 0)] : e.searchUrl).replace('{q}', encodeURIComponent(keyword));
-        const a = document.createElement('a');
-        a.className = 'qe-btn';
-        a.href = url;
-        a.innerHTML = `<img src="${e.logo}" onerror="this.src='https://www.google.com/favicon.ico'">${e.name}`;
-        bar.appendChild(a);
-      });
+       .forEach(e => {
+         const url = (e.mirrors ? e.mirrors[GM_getValue('mirror_' + e.key, 0)] : e.searchUrl)
+                     .replace('{q}', encodeURIComponent(kw));
+         const a = document.createElement('a');
+         a.className = 'qe-btn';
+         a.href = url;
+         a.innerHTML = `<img src="${e.logo}" onerror="this.src='https://www.google.com/favicon.ico'">${e.name}`;
+         bar.appendChild(a);
+       });
 
-    /* 插入位置：搜索框下方（Google / Bing / DDG / Yandex / Baidu 均测试过） */
-    let anchor =
-      $('form[role="search"], form#searchform, form[action*="/search"], .search-form, #search-form') ||
-      $('input[name="q"], input[name="wd"]').closest('form');
+    const anchor =
+      $('form[role="search"], form#searchform, form[action*="/search"]') ||
+      $('form[action*="google"], form[action*="yandex"], form[action*="duckduckgo"], form[action*="baidu"]') ||
+      (() => {
+        const inp = $('input[type="text"], input[type="search"]');
+        return inp ? inp.closest('form') || inp.parentElement : null;
+      })();
     if (anchor) {
-      anchor.parentNode.insertBefore(bar, anchor.nextSibling);
-      highlightKeyword(keyword);
+      if (anchor.nextSibling) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+      else anchor.parentNode.appendChild(bar);
+      highlightKeyword(kw);
     }
   }
 
-  /* ============ 5.  设置面板 ============ */
+  /* ========== 5. 可视化设置面板 ========== */
   function openSettings() {
     let panel = $('#qeSettings');
     if (panel) { panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; return; }
@@ -187,7 +172,7 @@
     document.body.appendChild(panel);
 
     function renderList() {
-      const selected = GM_getValue('selectedEngines', ['google', 'yandex', 'duckduckgo']);
+      const selected = GM_getValue('selectedEngines', ['google', 'bing', 'yandex']);
       const customEngines = GM_getValue('customEngines', []);
       const all = [...ENGINE_DB, ...customEngines];
       $('#qeList').innerHTML = all.map(e => `
@@ -199,7 +184,7 @@
 
     $('#addBtn').onclick = () => {
       const name = $('#custName').value.trim();
-      const url = $('#custUrl').value.trim();
+      const url  = $('#custUrl').value.trim();
       if (!name || !url || !url.includes('{q}')) return alert('名称和链接必填，且链接须包含 {q}');
       const custom = GM_getValue('customEngines', []);
       custom.push({ key: 'cust_' + Date.now(), name, logo: 'https://www.google.com/favicon.ico', searchUrl: url });
@@ -217,9 +202,9 @@
     };
   }
 
-  /* ============ 6.  入口 ============ */
+  /* ========== 6. 初始化 ========== */
   function init() {
-    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'yandex', 'duckduckgo']);
+    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex']);
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
