@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         手机端快捷搜索助手（谷歌通配 / 无百度）
+// @name         手机端快捷搜索助手（4选3固定）
 // @namespace    https://github.com/yourname
-// @version      1.1.0
-// @description  搜索框下方快速切换引擎 / 关键词高亮 / 可视化设置
+// @version      1.2.0
+// @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
 // @grant        GM_setValue
@@ -14,14 +14,14 @@
 (function () {
   'use strict';
 
-  /* ========== 1. 引擎数据（去掉百度） ========== */
+  /* ========== 1. 引擎数据（无百度） ========== */
   const ENGINE_DB = [
     {
       key: 'google',
       name: 'Google',
       logo: 'https://www.google.com/favicon.ico',
       searchUrl: 'https://www.google.com/search?q={q}',
-      mirrors: [                       // 可继续加更多镜像
+      mirrors: [
         'https://www.google.com/search?q={q}',
         'https://www.google.com.hk/search?q={q}',
         'https://www.google.co.jp/search?q={q}'
@@ -38,16 +38,16 @@
       ]
     },
     {
-      key: 'duckduckgo',
-      name: 'DuckDuckGo',
-      logo: 'https://duckduckgo.com/favicon.ico',
-      searchUrl: 'https://duckduckgo.com/?q={q}'
-    },
-    {
       key: 'yandex',
       name: 'Yandex',
       logo: 'https://yandex.com/favicon.ico',
       searchUrl: 'https://yandex.com/search/?text={q}'
+    },
+    {
+      key: 'duckduckgo',
+      name: 'DuckDuckGo',
+      logo: 'https://duckduckgo.com/favicon.ico',
+      searchUrl: 'https://duckduckgo.com/?q={q}'
     }
   ];
 
@@ -58,17 +58,18 @@
   /* 识别当前引擎：谷歌通配任意后缀 */
   function detectCurrentEngine() {
     const h = location.hostname;
-    if (/^www\.google\./.test(h)) return 'google';      // 任意 google.xx
+    if (/^www\.google\./.test(h)) return 'google';
     if (/bing\.(com|cn)/.test(h)) return 'bing';
-    if (/duckduckgo\.com/.test(h)) return 'duckduckgo';
     if (/yandex\.(com|ru)/.test(h)) return 'yandex';
+    if (/duckduckgo\.com/.test(h)) return 'duckduckgo';
     return '';
   }
 
   /* 取关键词 */
   function getQuery() {
     const q = new URLSearchParams(location.search).get('q') ||
-              new URLSearchParams(location.search).get('wd') || '';
+              new URLSearchParams(location.search).get('wd') ||
+              new URLSearchParams(location.search).get('text') || '';   // Yandex 用 text
     return decodeURIComponent(q);
   }
 
@@ -121,7 +122,8 @@
     const kw = getQuery();
     if (!kw) return;
     const current = detectCurrentEngine();
-    const selectedKeys = GM_getValue('selectedEngines', ['google', 'bing', 'yandex']);
+    /* 关键：默认 4 个全部勾选，所以永远出现另外 3 个 */
+    const selectedKeys = GM_getValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
     const customEngines = GM_getValue('customEngines', []);
     const all = [...ENGINE_DB, ...customEngines];
 
@@ -138,11 +140,12 @@
          bar.appendChild(a);
        });
 
-    const anchor =
+    /* 万能锚点：Yandex / DuckDuckGo 也能插进去 */
+    let anchor =
       $('form[role="search"], form#searchform, form[action*="/search"]') ||
       $('form[action*="google"], form[action*="yandex"], form[action*="duckduckgo"], form[action*="baidu"]') ||
       (() => {
-        const inp = $('input[type="text"], input[type="search"]');
+        const inp = $('input[name="q"], input[name="wd"], input[name="text"]');
         return inp ? inp.closest('form') || inp.parentElement : null;
       })();
     if (anchor) {
@@ -152,7 +155,7 @@
     }
   }
 
-  /* ========== 5. 可视化设置面板 ========== */
+  /* ========== 5. 可视化设置（无百度） ========== */
   function openSettings() {
     let panel = $('#qeSettings');
     if (panel) { panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; return; }
@@ -172,7 +175,7 @@
     document.body.appendChild(panel);
 
     function renderList() {
-      const selected = GM_getValue('selectedEngines', ['google', 'bing', 'yandex']);
+      const selected = GM_getValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
       const customEngines = GM_getValue('customEngines', []);
       const all = [...ENGINE_DB, ...customEngines];
       $('#qeList').innerHTML = all.map(e => `
@@ -204,7 +207,7 @@
 
   /* ========== 6. 初始化 ========== */
   function init() {
-    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex']);
+    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
