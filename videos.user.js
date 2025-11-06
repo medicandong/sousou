@@ -1,137 +1,184 @@
 // ==UserScript==
-// @name         手机Edge视频播放助手-真全屏版
+// @name         手机Edge视频全屏助手
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  手机Edge浏览器网页视频播放助手，实现真正的全屏功能
+// @version      2.0
+// @description  手机Edge浏览器视频全屏播放助手，支持倍速、画面尺寸
 // @author       You
 // @match        *://*/*
 // @grant        none
+// @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
+    // 配置
     const CONFIG = {
         playbackRates: [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0],
-        videoSizes: ['填充', '拉伸', '适应', '原始']
+        videoSizes: ['填充', '拉伸', '适应', '原始'],
+        buttonSize: '44px',
+        buttonMargin: '16px'
     };
 
     let currentVideo = null;
     let isFullscreen = false;
-    let originalStyles = {};
     let currentPlaybackRate = 1.0;
     let currentVideoSize = '适应';
+    let assistantInitialized = false;
 
-    // 创建移动端优化的悬浮按钮
-    function createMobileFloatingButton() {
-        const button = document.createElement('div');
-        button.innerHTML = `
+    // 全屏API兼容性处理
+    const fullscreenAPI = {
+        request: function(element) {
+            if (element.requestFullscreen) return element.requestFullscreen();
+            if (element.webkitRequestFullscreen) return element.webkitRequestFullscreen();
+            if (element.mozRequestFullScreen) return element.mozRequestFullScreen();
+            if (element.msRequestFullscreen) return element.msRequestFullscreen();
+            return Promise.reject(new Error('全屏API不支持'));
+        },
+        exit: function() {
+            if (document.exitFullscreen) return document.exitFullscreen();
+            if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+            if (document.mozCancelFullScreen) return document.mozCancelFullScreen();
+            if (document.msExitFullscreen) return document.msExitFullscreen();
+            return Promise.reject(new Error('退出全屏API不支持'));
+        },
+        get isSupported() {
+            return !!(document.fullscreenEnabled || 
+                     document.webkitFullscreenEnabled || 
+                     document.mozFullScreenEnabled || 
+                     document.msFullscreenEnabled);
+        }
+    };
+
+    // 屏幕方向API兼容性处理
+    const orientationAPI = {
+        lock: function(orientation) {
+            if (screen.orientation && screen.orientation.lock) {
+                return screen.orientation.lock(orientation);
+            }
+            return Promise.reject(new Error('屏幕方向锁定不支持'));
+        },
+        unlock: function() {
+            if (screen.orientation && screen.orientation.unlock) {
+                return screen.orientation.unlock();
+            }
+            return Promise.reject(new Error('屏幕方向解锁不支持'));
+        },
+        get isSupported() {
+            return !!(screen.orientation && screen.orientation.lock);
+        }
+    };
+
+    // 创建悬浮按钮
+    function createFloatingButton() {
+        if (assistantInitialized) return;
+        
+        const buttonHTML = `
             <style>
-                .mobile-video-assistant {
+                .video-assistant-floating {
                     position: fixed;
-                    right: 16px;
+                    right: ${CONFIG.buttonMargin};
                     bottom: 80px;
-                    width: 44px;
-                    height: 44px;
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    width: ${CONFIG.buttonSize};
+                    height: ${CONFIG.buttonSize};
+                    background: linear-gradient(135deg, #667eea, #764ba2);
                     border-radius: 50%;
                     display: none;
                     align-items: center;
                     justify-content: center;
                     cursor: pointer;
-                    z-index: 10000;
+                    z-index: 2147483647;
                     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                    border: 2px solid white;
+                    border: 2px solid rgba(255,255,255,0.8);
                     touch-action: manipulation;
+                    transition: all 0.3s ease;
                 }
                 
-                .mobile-video-assistant::before {
+                .video-assistant-floating:active {
+                    transform: scale(0.95);
+                }
+                
+                .video-assistant-floating::before {
                     content: '';
                     width: 24px;
                     height: 24px;
                     background: white;
-                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
-                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='white' d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
+                    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
+                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'/%3E%3C/svg%3E");
                 }
-
-                .mobile-bottom-menu {
+                
+                .video-assistant-panel {
                     position: fixed;
                     bottom: 0;
                     left: 0;
                     right: 0;
                     background: rgba(0, 0, 0, 0.95);
                     backdrop-filter: blur(20px);
-                    border-top-left-radius: 16px;
-                    border-top-right-radius: 16px;
-                    padding: 16px;
-                    z-index: 10001;
+                    border-radius: 16px 16px 0 0;
+                    padding: 20px 16px;
+                    z-index: 2147483646;
                     transform: translateY(100%);
                     transition: transform 0.3s ease;
                 }
                 
-                .mobile-bottom-menu.show {
+                .video-assistant-panel.show {
                     transform: translateY(0);
                 }
                 
-                .menu-header {
+                .panel-header {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
-                    margin-bottom: 16px;
+                    margin-bottom: 20px;
                     color: white;
-                    font-size: 16px;
-                    font-weight: bold;
+                    font-size: 18px;
+                    font-weight: 600;
                 }
                 
-                .close-btn {
+                .panel-close {
                     width: 24px;
                     height: 24px;
                     background: white;
-                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
                     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
+                    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'/%3E%3C/svg%3E");
                     cursor: pointer;
                 }
                 
-                .menu-grid {
+                .panel-grid {
                     display: grid;
                     grid-template-columns: 1fr 1fr;
                     gap: 12px;
                 }
                 
-                .menu-item {
+                .panel-item {
                     background: rgba(255, 255, 255, 0.1);
                     border-radius: 12px;
                     padding: 16px;
                     text-align: center;
                     color: white;
-                    font-size: 14px;
+                    font-size: 16px;
                     cursor: pointer;
                     border: 1px solid rgba(255, 255, 255, 0.2);
-                    transition: background 0.2s ease;
+                    transition: all 0.2s ease;
                 }
                 
-                .menu-item:active {
+                .panel-item:active {
                     background: rgba(255, 255, 255, 0.2);
+                    transform: scale(0.98);
                 }
                 
-                .mobile-fullscreen-controls {
+                .fullscreen-controls {
                     position: fixed;
                     bottom: 0;
                     left: 0;
                     right: 0;
-                    background: linear-gradient(transparent, rgba(0,0,0,0.9));
-                    padding: 20px 16px;
+                    background: linear-gradient(transparent, rgba(0,0,0,0.8));
+                    padding: 16px;
                     display: none;
                     align-items: center;
                     justify-content: space-between;
-                    z-index: 10002;
+                    z-index: 2147483645;
                     color: white;
-                }
-                
-                .control-group {
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
                 }
                 
                 .control-item {
@@ -158,23 +205,23 @@
                     background: #4ecdc4;
                     border-radius: 2px;
                     width: 0%;
+                    transition: width 0.1s ease;
                 }
                 
-                .options-panel {
+                .options-modal {
                     position: fixed;
                     bottom: 0;
                     left: 0;
                     right: 0;
                     background: rgba(0, 0, 0, 0.95);
-                    border-top-left-radius: 16px;
-                    border-top-right-radius: 16px;
-                    padding: 16px;
-                    z-index: 10003;
+                    border-radius: 16px 16px 0 0;
+                    padding: 20px 16px;
+                    z-index: 2147483644;
                     transform: translateY(100%);
                     transition: transform 0.3s ease;
                 }
                 
-                .options-panel.show {
+                .options-modal.show {
                     transform: translateY(0);
                 }
                 
@@ -193,11 +240,17 @@
                     color: white;
                     font-size: 14px;
                     cursor: pointer;
+                    transition: all 0.2s ease;
                 }
                 
                 .option-item.active {
                     background: #4ecdc4;
                     color: black;
+                    font-weight: 600;
+                }
+                
+                .option-item:active {
+                    transform: scale(0.95);
                 }
                 
                 .overlay {
@@ -207,87 +260,61 @@
                     right: 0;
                     bottom: 0;
                     background: rgba(0, 0, 0, 0.5);
-                    z-index: 9999;
+                    z-index: 2147483643;
                     display: none;
                 }
                 
                 .overlay.show {
                     display: block;
                 }
-
-                /* 真正的全屏样式 */
-                .video-fullscreen-mode {
-                    position: fixed !important;
-                    top: 0 !important;
-                    left: 0 !important;
-                    width: 100vw !important;
-                    height: 100vh !important;
-                    z-index: 9998 !important;
-                    background: black !important;
+                
+                /* 全屏视频样式 */
+                .video-fullscreen {
                     object-fit: contain !important;
                 }
                 
-                .fullscreen-backdrop {
-                    position: fixed !important;
-                    top: 0 !important;
-                    left: 0 !important;
-                    width: 100vw !important;
-                    height: 100vh !important;
-                    background: black !important;
-                    z-index: 9997 !important;
-                }
-                
-                /* 隐藏页面其他元素 */
-                body.video-fullscreen-active * {
-                    visibility: hidden !important;
-                }
-                
-                body.video-fullscreen-active .video-fullscreen-mode,
-                body.video-fullscreen-active .fullscreen-backdrop,
-                body.video-fullscreen-active .mobile-fullscreen-controls {
-                    visibility: visible !important;
+                /* 隐藏原生控制条 */
+                video::-webkit-media-controls {
+                    display: none !important;
                 }
             </style>
             
-            <div class="mobile-video-assistant" id="mobileVideoAssistant"></div>
+            <div class="video-assistant-floating" id="videoAssistantBtn"></div>
             
-            <div class="mobile-bottom-menu" id="mobileBottomMenu">
-                <div class="menu-header">
-                    <span>播放设置</span>
-                    <div class="close-btn" id="closeMenuBtn"></div>
+            <div class="video-assistant-panel" id="videoAssistantPanel">
+                <div class="panel-header">
+                    <span>视频设置</span>
+                    <div class="panel-close" id="panelCloseBtn"></div>
                 </div>
-                <div class="menu-grid">
-                    <div class="menu-item" id="mobileFullscreenBtn">全屏播放</div>
-                    <div class="menu-item" id="playbackRateBtn">倍速选择</div>
-                    <div class="menu-item" id="videoSizeBtn">画面尺寸</div>
+                <div class="panel-grid">
+                    <div class="panel-item" id="fullscreenBtn">全屏播放</div>
+                    <div class="panel-item" id="playbackRateBtn">播放倍速</div>
+                    <div class="panel-item" id="videoSizeBtn">画面尺寸</div>
+                    <div class="panel-item" id="exitFullscreenBtn" style="display:none">退出全屏</div>
                 </div>
             </div>
             
-            <div class="mobile-fullscreen-controls" id="mobileFullscreenControls">
-                <div class="control-group">
-                    <div class="progress-container" id="mobileProgressContainer">
-                        <div class="progress-bar" id="mobileProgressBar"></div>
-                    </div>
+            <div class="fullscreen-controls" id="fullscreenControls">
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar" id="progressBar"></div>
                 </div>
-                <div class="control-group">
-                    <div class="control-item" id="mobileRateDisplay">1.0</div>
-                    <div class="control-item" id="mobileSizeDisplay">适应</div>
-                    <div class="control-item" id="mobileExitFullscreen">退出</div>
-                </div>
+                <div class="control-item" id="rateDisplay">1.0</div>
+                <div class="control-item" id="sizeDisplay">适应</div>
+                <div class="control-item" id="exitBtn">退出</div>
             </div>
             
-            <div class="options-panel" id="playbackRatePanel">
-                <div class="menu-header">
-                    <span>选择播放倍速</span>
-                    <div class="close-btn" id="closeRatePanel"></div>
+            <div class="options-modal" id="playbackRateModal">
+                <div class="panel-header">
+                    <span>选择播放速度</span>
+                    <div class="panel-close" id="closeRateModal"></div>
                 </div>
                 <div class="options-grid" id="playbackRateOptions"></div>
             </div>
             
-            <div class="options-panel" id="videoSizePanel">
-                <div class="menu-header">
+            <div class="options-modal" id="videoSizeModal">
+                <div class="panel-header">
                     <span>选择画面尺寸</span>
-                    <div class="close-btn" id="closeSizePanel"></div>
+                    <div class="panel-close" id="closeSizeModal"></div>
                 </div>
                 <div class="options-grid" id="videoSizeOptions"></div>
             </div>
@@ -295,111 +322,121 @@
             <div class="overlay" id="overlay"></div>
         `;
 
-        document.body.appendChild(button);
+        const container = document.createElement('div');
+        container.innerHTML = buttonHTML;
+        document.body.appendChild(container);
+        
         setupEventListeners();
+        assistantInitialized = true;
     }
 
     function setupEventListeners() {
-        const assistant = document.getElementById('mobileVideoAssistant');
-        const closeMenuBtn = document.getElementById('closeMenuBtn');
-        const fullscreenBtn = document.getElementById('mobileFullscreenBtn');
-        const playbackRateBtn = document.getElementById('playbackRateBtn');
-        const videoSizeBtn = document.getElementById('videoSizeBtn');
-        const overlay = document.getElementById('overlay');
+        // 悬浮按钮
+        document.getElementById('videoAssistantBtn').addEventListener('click', showAssistantPanel);
         
-        assistant.addEventListener('click', showBottomMenu);
-        closeMenuBtn.addEventListener('click', hideBottomMenu);
-        overlay.addEventListener('click', hideAllPanels);
-        fullscreenBtn.addEventListener('click', toggleMobileFullscreen);
-        playbackRateBtn.addEventListener('click', showPlaybackRatePanel);
-        videoSizeBtn.addEventListener('click', showVideoSizePanel);
+        // 面板关闭
+        document.getElementById('panelCloseBtn').addEventListener('click', hideAssistantPanel);
+        document.getElementById('overlay').addEventListener('click', hideAllModals);
         
-        document.getElementById('mobileExitFullscreen').addEventListener('click', exitMobileFullscreen);
-        document.getElementById('mobileRateDisplay').addEventListener('click', showPlaybackRatePanel);
-        document.getElementById('mobileSizeDisplay').addEventListener('click', showVideoSizePanel);
+        // 功能按钮
+        document.getElementById('fullscreenBtn').addEventListener('click', toggleFullscreen);
+        document.getElementById('playbackRateBtn').addEventListener('click', showPlaybackRateModal);
+        document.getElementById('videoSizeBtn').addEventListener('click', showVideoSizeModal);
+        document.getElementById('exitFullscreenBtn').addEventListener('click', exitFullscreen);
         
-        document.getElementById('mobileProgressContainer').addEventListener('click', (e) => {
-            if (currentVideo && isFullscreen) {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const percent = (e.clientX - rect.left) / rect.width;
-                currentVideo.currentTime = percent * currentVideo.duration;
-            }
-        });
+        // 全屏控制栏
+        document.getElementById('exitBtn').addEventListener('click', exitFullscreen);
+        document.getElementById('rateDisplay').addEventListener('click', showPlaybackRateModal);
+        document.getElementById('sizeDisplay').addEventListener('click', showVideoSizeModal);
         
-        initOptionsPanels();
+        // 进度条
+        document.getElementById('progressContainer').addEventListener('click', handleProgressClick);
+        
+        // 模态框关闭
+        document.getElementById('closeRateModal').addEventListener('click', hideAllModals);
+        document.getElementById('closeSizeModal').addEventListener('click', hideAllModals);
+        
+        // 初始化选项
+        initOptions();
+        
+        // 全屏事件监听
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+        document.addEventListener('MSFullscreenChange', handleFullscreenChange);
     }
 
-    function initOptionsPanels() {
+    function initOptions() {
+        // 初始化倍速选项
         const rateOptions = document.getElementById('playbackRateOptions');
         rateOptions.innerHTML = CONFIG.playbackRates.map(rate => `
             <div class="option-item ${rate === 1.0 ? 'active' : ''}" data-rate="${rate}">${rate}x</div>
         `).join('');
         
+        // 初始化尺寸选项
         const sizeOptions = document.getElementById('videoSizeOptions');
         sizeOptions.innerHTML = CONFIG.videoSizes.map(size => `
             <div class="option-item ${size === '适应' ? 'active' : ''}" data-size="${size}">${size}</div>
         `).join('');
         
+        // 倍速选项事件
         rateOptions.querySelectorAll('.option-item').forEach(item => {
             item.addEventListener('click', () => {
                 const rate = parseFloat(item.getAttribute('data-rate'));
                 setPlaybackRate(rate);
-                currentPlaybackRate = rate;
-                document.getElementById('mobileRateDisplay').textContent = rate.toFixed(2);
+                document.getElementById('rateDisplay').textContent = rate.toFixed(2);
                 rateOptions.querySelectorAll('.option-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                hideAllPanels();
+                hideAllModals();
             });
         });
         
+        // 尺寸选项事件
         sizeOptions.querySelectorAll('.option-item').forEach(item => {
             item.addEventListener('click', () => {
                 const size = item.getAttribute('data-size');
                 setVideoSize(size);
-                currentVideoSize = size;
-                document.getElementById('mobileSizeDisplay').textContent = size;
+                document.getElementById('sizeDisplay').textContent = size;
                 sizeOptions.querySelectorAll('.option-item').forEach(i => i.classList.remove('active'));
                 item.classList.add('active');
-                hideAllPanels();
+                hideAllModals();
             });
         });
-        
-        document.getElementById('closeRatePanel').addEventListener('click', hideAllPanels);
-        document.getElementById('closeSizePanel').addEventListener('click', hideAllPanels);
     }
 
-    function showBottomMenu() {
-        document.getElementById('mobileBottomMenu').classList.add('show');
+    function showAssistantPanel() {
+        document.getElementById('videoAssistantPanel').classList.add('show');
         document.getElementById('overlay').classList.add('show');
     }
 
-    function hideBottomMenu() {
-        document.getElementById('mobileBottomMenu').classList.remove('show');
+    function hideAssistantPanel() {
+        document.getElementById('videoAssistantPanel').classList.remove('show');
         document.getElementById('overlay').classList.remove('show');
     }
 
-    function hideAllPanels() {
-        hideBottomMenu();
-        document.getElementById('playbackRatePanel').classList.remove('show');
-        document.getElementById('videoSizePanel').classList.remove('show');
+    function hideAllModals() {
+        hideAssistantPanel();
+        document.getElementById('playbackRateModal').classList.remove('show');
+        document.getElementById('videoSizeModal').classList.remove('show');
         document.getElementById('overlay').classList.remove('show');
     }
 
-    function showPlaybackRatePanel() {
-        document.getElementById('playbackRatePanel').classList.add('show');
+    function showPlaybackRateModal() {
+        document.getElementById('playbackRateModal').classList.add('show');
         document.getElementById('overlay').classList.add('show');
     }
 
-    function showVideoSizePanel() {
-        document.getElementById('videoSizePanel').classList.add('show');
+    function showVideoSizeModal() {
+        document.getElementById('videoSizeModal').classList.add('show');
         document.getElementById('overlay').classList.add('show');
     }
 
-    function toggleMobileFullscreen() {
-        if (!isFullscreen) {
-            enterMobileFullscreen();
+    function handleProgressClick(e) {
+        if (currentVideo && isFullscreen) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            currentVideo.currentTime = percent * currentVideo.duration;
         }
-        hideBottomMenu();
     }
 
     // 智能判断横竖屏
@@ -409,181 +446,149 @@
         return aspectRatio > 1.2;
     }
 
-    // 进入真正的全屏模式
-    function enterMobileFullscreen() {
+    async function toggleFullscreen() {
         if (!currentVideo) return;
         
-        console.log('进入真正全屏模式');
-        
-        // 保存原始状态
-        originalStyles = {
-            position: currentVideo.style.position,
-            width: currentVideo.style.width,
-            height: currentVideo.style.height,
-            top: currentVideo.style.top,
-            left: currentVideo.style.left,
-            zIndex: currentVideo.style.zIndex,
-            objectFit: currentVideo.style.objectFit,
-            parent: currentVideo.parentElement
-        };
-        
-        // 创建全屏背景
-        const backdrop = document.createElement('div');
-        backdrop.className = 'fullscreen-backdrop';
-        document.body.appendChild(backdrop);
-        
-        // 将视频移动到body最顶层
-        document.body.appendChild(currentVideo);
-        
-        // 应用全屏样式
-        currentVideo.classList.add('video-fullscreen-mode');
-        Object.assign(currentVideo.style, {
-            position: 'fixed',
-            top: '0',
-            left: '0',
-            width: '100vw',
-            height: '100vh',
-            zIndex: '9998',
-            backgroundColor: '#000',
-            objectFit: getObjectFitValue(currentVideoSize)
-        });
-        
-        // 隐藏页面其他内容
-        document.body.classList.add('video-fullscreen-active');
-        
-        // 显示控制栏
-        document.getElementById('mobileFullscreenControls').style.display = 'flex';
-        document.getElementById('mobileVideoAssistant').style.display = 'none';
-        
-        isFullscreen = true;
-        
-        // 智能横屏处理
-        if (shouldUseLandscape(currentVideo)) {
-            console.log('视频为横向，尝试横屏显示');
-            lockScreenOrientation('landscape');
+        if (!isFullscreen) {
+            await enterFullscreen();
+        } else {
+            await exitFullscreen();
         }
-        
-        // 开始更新进度
-        updateProgress();
+        hideAllModals();
     }
 
-    // 退出全屏
-    function exitMobileFullscreen() {
+    async function enterFullscreen() {
         if (!currentVideo) return;
         
-        console.log('退出全屏模式');
-        
-        // 移除全屏样式
-        currentVideo.classList.remove('video-fullscreen-mode');
-        document.body.classList.remove('video-fullscreen-active');
-        
-        // 移除全屏背景
-        const backdrop = document.querySelector('.fullscreen-backdrop');
-        if (backdrop) backdrop.remove();
-        
-        // 恢复视频到原始位置
-        if (originalStyles.parent) {
-            originalStyles.parent.appendChild(currentVideo);
-        }
-        
-        // 恢复原始样式
-        Object.keys(originalStyles).forEach(prop => {
-            if (prop !== 'parent') {
-                currentVideo.style[prop] = originalStyles[prop];
-            }
-        });
-        
-        // 隐藏控制栏
-        document.getElementById('mobileFullscreenControls').style.display = 'none';
-        document.getElementById('mobileVideoAssistant').style.display = 'flex';
-        
-        // 解锁屏幕方向
-        unlockScreenOrientation();
-        
-        isFullscreen = false;
-    }
-
-    // 锁定屏幕方向
-    function lockScreenOrientation(orientation) {
         try {
-            if (screen.orientation && screen.orientation.lock) {
-                screen.orientation.lock(orientation).catch(e => {
-                    console.log('屏幕方向锁定失败:', e);
-                });
+            // 添加全屏样式
+            currentVideo.classList.add('video-fullscreen');
+            
+            // 请求全屏
+            await fullscreenAPI.request(currentVideo);
+            
+            // 智能横屏
+            if (shouldUseLandscape(currentVideo) && orientationAPI.isSupported) {
+                try {
+                    await orientationAPI.lock('landscape');
+                } catch (e) {
+                    console.log('横屏锁定失败:', e);
+                }
             }
-        } catch (e) {
-            console.log('屏幕方向锁定异常:', e);
+            
+            // 显示控制栏
+            document.getElementById('fullscreenControls').style.display = 'flex';
+            document.getElementById('videoAssistantBtn').style.display = 'none';
+            
+            // 开始更新进度
+            updateProgress();
+            
+        } catch (error) {
+            console.error('进入全屏失败:', error);
+            // 回滚样式
+            currentVideo.classList.remove('video-fullscreen');
         }
     }
 
-    // 解锁屏幕方向
-    function unlockScreenOrientation() {
+    async function exitFullscreen() {
         try {
-            if (screen.orientation && screen.orientation.unlock) {
-                screen.orientation.unlock();
+            // 退出全屏
+            await fullscreenAPI.exit();
+            
+            // 解锁屏幕方向
+            if (orientationAPI.isSupported) {
+                try {
+                    await orientationAPI.unlock();
+                } catch (e) {
+                    console.log('屏幕方向解锁失败:', e);
+                }
             }
-        } catch (e) {
-            console.log('屏幕方向解锁失败:', e);
+            
+            // 隐藏控制栏
+            document.getElementById('fullscreenControls').style.display = 'none';
+            document.getElementById('videoAssistantBtn').style.display = 'flex';
+            
+            // 移除全屏样式
+            if (currentVideo) {
+                currentVideo.classList.remove('video-fullscreen');
+            }
+            
+        } catch (error) {
+            console.error('退出全屏失败:', error);
         }
     }
 
-    // 获取object-fit值
-    function getObjectFitValue(size) {
-        switch (size) {
-            case '填充': return 'cover';
-            case '拉伸': return 'fill';
-            case '适应': return 'contain';
-            case '原始': return 'none';
-            default: return 'contain';
+    function handleFullscreenChange() {
+        const fullscreenElement = document.fullscreenElement || 
+                                document.webkitFullscreenElement ||
+                                document.mozFullScreenElement ||
+                                document.msFullscreenElement;
+        
+        isFullscreen = !!fullscreenElement;
+        
+        if (!isFullscreen) {
+            // 全屏退出后的清理
+            document.getElementById('fullscreenControls').style.display = 'none';
+            document.getElementById('videoAssistantBtn').style.display = 'flex';
+            if (currentVideo) {
+                currentVideo.classList.remove('video-fullscreen');
+            }
         }
     }
 
-    // 设置播放倍速
     function setPlaybackRate(rate) {
         if (currentVideo) {
             currentVideo.playbackRate = rate;
+            currentPlaybackRate = rate;
         }
     }
 
-    // 设置视频尺寸
     function setVideoSize(size) {
-        if (currentVideo && isFullscreen) {
-            currentVideo.style.objectFit = getObjectFitValue(size);
+        if (currentVideo) {
+            let objectFitValue;
+            switch (size) {
+                case '填充': objectFitValue = 'cover'; break;
+                case '拉伸': objectFitValue = 'fill'; break;
+                case '适应': objectFitValue = 'contain'; break;
+                case '原始': objectFitValue = 'none'; break;
+                default: objectFitValue = 'contain';
+            }
+            currentVideo.style.objectFit = objectFitValue;
+            currentVideoSize = size;
         }
     }
 
-    // 更新进度条
     function updateProgress() {
         if (currentVideo && isFullscreen) {
             const progress = (currentVideo.currentTime / currentVideo.duration) * 100;
-            document.getElementById('mobileProgressBar').style.width = progress + '%';
+            document.getElementById('progressBar').style.width = progress + '%';
             requestAnimationFrame(updateProgress);
         }
     }
 
-    // 检测视频元素
+    // 视频检测
     function detectVideo() {
         const videos = document.querySelectorAll('video');
         
         videos.forEach(video => {
-            if (!video.hasAttribute('data-mobile-assistant')) {
-                video.setAttribute('data-mobile-assistant', 'true');
+            if (!video.hasAttribute('data-video-assistant')) {
+                video.setAttribute('data-video-assistant', 'true');
                 
                 video.addEventListener('play', () => {
                     currentVideo = video;
-                    document.getElementById('mobileVideoAssistant').style.display = 'flex';
+                    document.getElementById('videoAssistantBtn').style.display = 'flex';
                 });
                 
                 video.addEventListener('pause', () => {
                     if (!isFullscreen) {
-                        document.getElementById('mobileVideoAssistant').style.display = 'none';
+                        document.getElementById('videoAssistantBtn').style.display = 'none';
                     }
                 });
                 
                 video.addEventListener('ended', () => {
-                    document.getElementById('mobileVideoAssistant').style.display = 'none';
+                    document.getElementById('videoAssistantBtn').style.display = 'none';
                     if (isFullscreen) {
-                        exitMobileFullscreen();
+                        exitFullscreen();
                     }
                 });
             }
@@ -592,22 +597,23 @@
 
     // 初始化
     function init() {
-        setTimeout(() => {
-            createMobileFloatingButton();
-            detectVideo();
-            
-            setInterval(detectVideo, 2000);
-            
-            const observer = new MutationObserver(detectVideo);
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
-            
-            console.log('手机Edge视频播放助手-真全屏版已加载');
-        }, 1000);
+        createFloatingButton();
+        detectVideo();
+        
+        // 持续检测新视频
+        setInterval(detectVideo, 2000);
+        
+        // 监听DOM变化
+        const observer = new MutationObserver(detectVideo);
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        console.log('手机Edge视频全屏助手已加载');
     }
 
+    // 启动
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
