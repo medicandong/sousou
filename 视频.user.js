@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         网页视频播放助手 - 调试版
+// @name         网页视频播放助手
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  手机浏览器视频播放助手 - 调试版本，包含详细日志
+// @description  手机浏览器视频播放助手，支持全屏、倍速、画面尺寸调节
 // @author       Video Assistant
 // @match        *://*/*
 // @grant        none
@@ -11,309 +11,83 @@
 (function() {
     'use strict';
 
-    // 配置项
+    // 配置
     const CONFIG = {
-        playbackRates: [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0],
-        videoSizes: [
+        speeds: [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0],
+        sizes: [
             { name: '填充', value: 'fill' },
             { name: '拉伸', value: 'stretch' },
-            { name: '适应', value: 'fit' },
-            { name: '原始', value: 'original' }
+            { name: '适应', value: 'contain' },
+            { name: '原始', value: 'none' }
         ]
     };
 
     // 全局变量
     let currentVideo = null;
-    let isFullscreen = false;
-    let originalVideoStyle = null;
     let floatingButton = null;
     let controlPanel = null;
-    let fullscreenControls = null;
-
-    // 调试日志
-    function debugLog(message, data = null) {
-        console.log(`[视频助手] ${message}`, data || '');
-    }
-
-    // 显示调试信息
-    function showDebugInfo() {
-        const debugDiv = document.createElement('div');
-        debugDiv.style.cssText = `
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 12px;
-            z-index: 99999;
-            max-width: 300px;
-        `;
-        debugDiv.innerHTML = `
-            <div>视频助手调试信息</div>
-            <div>当前视频: ${currentVideo ? '已找到' : '未找到'}</div>
-            <div>悬浮按钮: ${floatingButton ? '已创建' : '未创建'}</div>
-            <div>全屏状态: ${isFullscreen ? '是' : '否'}</div>
-        `;
-        document.body.appendChild(debugDiv);
-
-        setTimeout(() => {
-            if (document.body.contains(debugDiv)) {
-                document.body.removeChild(debugDiv);
-            }
-        }, 5000);
-    }
+    let isFullscreen = false;
+    let originalVideoStyle = null;
 
     // 初始化
     function init() {
-        debugLog('脚本初始化开始');
+        console.log('视频播放助手初始化');
+        
+        // 监听页面加载完成
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', setupVideoListeners);
+        } else {
+            setupVideoListeners();
+        }
 
-        // 添加样式
-        addStyles();
-
-        // 显示初始化信息
-        showDebugInfo();
-
-        // 监听页面变化
+        // 监听动态加载的视频
         observeVideoElements();
-
-        // 定期检查视频元素
-        setInterval(checkForVideos, 1000);
-
-        // 添加手动触发按钮（用于调试）
-        addManualTrigger();
-
-        debugLog('脚本初始化完成');
     }
 
-    // 添加手动触发按钮
-    function addManualTrigger() {
-        const triggerBtn = document.createElement('button');
-        triggerBtn.textContent = '手动显示悬浮按钮';
-        triggerBtn.style.cssText = `
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            z-index: 99999;
-            font-size: 12px;
-        `;
-        triggerBtn.addEventListener('click', () => {
-            const videos = document.querySelectorAll('video');
-            debugLog('手动触发，找到视频数量:', videos.length);
-            if (videos.length > 0) {
-                currentVideo = videos[0];
-                showFloatingButton();
-                showDebugInfo();
-            }
-        });
-        document.body.appendChild(triggerBtn);
-    }
-
-    // 定期检查视频元素
-    function checkForVideos() {
+    // 设置视频监听器
+    function setupVideoListeners() {
         const videos = document.querySelectorAll('video');
-        debugLog('定期检查，视频数量:', videos.length);
+        console.log(`找到 ${videos.length} 个视频元素`);
 
-        videos.forEach((video, index) => {
-            if (!video.dataset.videoAssistantSetup) {
-                debugLog(`设置新视频监听 #${index}`, {
-                    paused: video.paused,
-                    ended: video.ended,
-                    currentTime: video.currentTime,
-                    duration: video.duration
+        videos.forEach(video => {
+            if (!video.hasAttribute('data-video-assistant-bound')) {
+                video.setAttribute('data-video-assistant-bound', 'true');
+                
+                video.addEventListener('play', () => {
+                    console.log('视频开始播放');
+                    currentVideo = video;
+                    showFloatingButton();
                 });
-                setupVideo(video);
+
+                video.addEventListener('pause', () => {
+                    console.log('视频暂停');
+                    hideFloatingButton();
+                });
+
+                video.addEventListener('ended', () => {
+                    console.log('视频结束');
+                    hideFloatingButton();
+                });
+
+                // 监听全屏变化
+                video.addEventListener('fullscreenchange', handleFullscreenChange);
+                video.addEventListener('webkitfullscreenchange', handleFullscreenChange);
             }
         });
     }
 
-    // 添加样式
-    function addStyles() {
-        const style = document.createElement('style');
-        style.textContent = `
-            .video-assistant-floating-btn {
-                position: fixed;
-                bottom: 80px;
-                right: 20px;
-                width: 44px;
-                height: 44px;
-                background: rgba(255, 0, 0, 0.8); /* 红色便于调试 */
-                border-radius: 22px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                z-index: 10000;
-                cursor: pointer;
-                transition: all 0.3s ease;
-                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-                border: 2px solid white;
-            }
-
-            .video-assistant-floating-btn::before {
-                content: '⚙️';
-                font-size: 20px;
-                color: white;
-            }
-
-            .video-assistant-control-panel {
-                position: fixed;
-                bottom: 130px;
-                right: 20px;
-                background: rgba(0, 0, 0, 0.9);
-                border-radius: 12px;
-                padding: 15px;
-                z-index: 10001;
-                min-width: 150px;
-                backdrop-filter: blur(10px);
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-                border: 1px solid #007bff;
-            }
-
-            .video-assistant-control-item {
-                color: white;
-                padding: 12px 16px;
-                margin: 5px 0;
-                border-radius: 8px;
-                cursor: pointer;
-                transition: background 0.2s ease;
-                font-size: 14px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            }
-
-            .video-assistant-control-item:hover {
-                background: rgba(255, 255, 255, 0.1);
-            }
-
-            .video-assistant-fullscreen-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: black;
-                z-index: 10002;
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-            }
-
-            .video-assistant-fullscreen-video {
-                max-width: 100%;
-                max-height: 100%;
-                object-fit: contain;
-            }
-
-            .video-assistant-fullscreen-controls {
-                position: fixed;
-                bottom: 0;
-                left: 0;
-                right: 0;
-                background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
-                padding: 20px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                z-index: 10003;
-            }
-
-            .video-assistant-control-group {
-                display: flex;
-                align-items: center;
-                gap: 15px;
-            }
-
-            .video-assistant-control-button {
-                background: rgba(255, 255, 255, 0.2);
-                border: none;
-                color: white;
-                padding: 8px 16px;
-                border-radius: 20px;
-                cursor: pointer;
-                font-size: 14px;
-                transition: background 0.2s ease;
-            }
-
-            .video-assistant-control-button:hover {
-                background: rgba(255, 255, 255, 0.3);
-            }
-
-            .video-assistant-dropdown {
-                position: absolute;
-                bottom: 100%;
-                left: 0;
-                background: rgba(0, 0, 0, 0.9);
-                border-radius: 8px;
-                padding: 10px;
-                min-width: 120px;
-                backdrop-filter: blur(10px);
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            }
-
-            .video-assistant-dropdown-item {
-                color: white;
-                padding: 10px 12px;
-                cursor: pointer;
-                border-radius: 6px;
-                transition: background 0.2s ease;
-                font-size: 13px;
-            }
-
-            .video-assistant-dropdown-item:hover {
-                background: rgba(255, 255, 255, 0.1);
-            }
-
-            .video-assistant-progress-bar {
-                flex: 1;
-                height: 4px;
-                background: rgba(255, 255, 255, 0.3);
-                border-radius: 2px;
-                margin: 0 15px;
-                position: relative;
-                cursor: pointer;
-            }
-
-            .video-assistant-progress-filled {
-                position: absolute;
-                height: 100%;
-                background: #ff4444;
-                border-radius: 2px;
-                width: 0%;
-            }
-
-            .video-assistant-hidden {
-                display: none !important;
-            }
-        `;
-        document.head.appendChild(style);
-        debugLog('样式已添加');
-    }
-
-    // 监听视频元素
+    // 监听动态加载的视频元素
     function observeVideoElements() {
-        debugLog('开始监听视频元素变化');
-
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
-                    if (node.nodeType === 1) {
+                    if (node.nodeType === 1) { // Element node
                         if (node.tagName === 'VIDEO') {
-                            debugLog('发现新的视频元素');
-                            setupVideo(node);
+                            setupVideoListeners();
                         } else {
                             const videos = node.querySelectorAll ? node.querySelectorAll('video') : [];
                             if (videos.length > 0) {
-                                debugLog(`在节点中发现 ${videos.length} 个视频元素`);
-                                videos.forEach(setupVideo);
+                                setupVideoListeners();
                             }
                         }
                     }
@@ -325,153 +99,132 @@
             childList: true,
             subtree: true
         });
-
-        // 检查现有视频
-        const existingVideos = document.querySelectorAll('video');
-        debugLog('检查现有视频数量:', existingVideos.length);
-        existingVideos.forEach(setupVideo);
-    }
-
-    // 设置视频监听
-    function setupVideo(video) {
-        if (video.dataset.videoAssistantSetup) {
-            debugLog('视频已设置过监听，跳过');
-            return;
-        }
-        video.dataset.videoAssistantSetup = 'true';
-
-        debugLog('设置视频监听', {
-            src: video.src,
-            paused: video.paused,
-            ended: video.ended
-        });
-
-        const showButton = () => {
-            debugLog('显示悬浮按钮触发');
-            currentVideo = video;
-            showFloatingButton();
-            showDebugInfo();
-        };
-
-        const hideButton = () => {
-            debugLog('隐藏悬浮按钮触发');
-            hideFloatingButton();
-            hideControlPanel();
-        };
-
-        // 监听多种播放相关事件
-        const events = ['play', 'playing', 'canplay', 'pause', 'ended', 'waiting'];
-        events.forEach(event => {
-            video.addEventListener(event, (e) => {
-                debugLog(`视频事件: ${event}`, {
-                    paused: video.paused,
-                    ended: video.ended,
-                    currentTime: video.currentTime
-                });
-            });
-        });
-
-        video.addEventListener('play', showButton);
-        video.addEventListener('playing', showButton);
-        video.addEventListener('canplay', () => {
-            if (!video.paused && !video.ended) {
-                debugLog('视频已可播放且正在播放，显示按钮');
-                showButton();
-            }
-        });
-
-        video.addEventListener('pause', hideButton);
-        video.addEventListener('ended', hideButton);
-        video.addEventListener('waiting', hideButton);
-
-        // 检查是否已经有视频在播放
-        if (!video.paused && !video.ended) {
-            debugLog('视频已在播放，立即显示按钮');
-            setTimeout(() => showButton(), 100);
-        }
-
-        // 监听页面可见性变化
-        document.addEventListener('visibilitychange', () => {
-            debugLog('页面可见性变化', { hidden: document.hidden });
-            if (document.hidden) {
-                hideButton();
-            } else if (!video.paused && !video.ended) {
-                setTimeout(() => showButton(), 500);
-            }
-        });
     }
 
     // 显示悬浮按钮
     function showFloatingButton() {
-        debugLog('显示悬浮按钮');
-
         if (floatingButton) {
-            floatingButton.classList.remove('video-assistant-hidden');
+            floatingButton.style.display = 'block';
             return;
         }
 
         floatingButton = document.createElement('div');
-        floatingButton.className = 'video-assistant-floating-btn';
-        floatingButton.title = '视频播放助手';
+        floatingButton.innerHTML = `
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <circle cx="12" cy="12" r="3"/>
+                <line x1="12" y1="5" x2="12" y2="8"/>
+                <line x1="12" y1="16" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="8" y2="12"/>
+                <line x1="16" y1="12" x2="19" y2="12"/>
+            </svg>
+        `;
 
-        floatingButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            debugLog('悬浮按钮被点击');
-            toggleControlPanel();
+        floatingButton.style.cssText = `
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            width: 44px;
+            height: 44px;
+            background: rgba(0, 0, 0, 0.7);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 10000;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            color: white;
+        `;
+
+        floatingButton.addEventListener('click', showControlPanel);
+        floatingButton.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            showControlPanel();
         });
 
         document.body.appendChild(floatingButton);
-        debugLog('悬浮按钮已创建并显示');
     }
 
     // 隐藏悬浮按钮
     function hideFloatingButton() {
-        debugLog('隐藏悬浮按钮');
         if (floatingButton) {
-            floatingButton.classList.add('video-assistant-hidden');
+            floatingButton.style.display = 'none';
         }
-    }
-
-    // 切换控制面板
-    function toggleControlPanel() {
-        if (controlPanel && !controlPanel.classList.contains('video-assistant-hidden')) {
-            hideControlPanel();
-        } else {
-            showControlPanel();
+        if (controlPanel) {
+            controlPanel.style.display = 'none';
         }
     }
 
     // 显示控制面板
     function showControlPanel() {
-        debugLog('显示控制面板');
+        if (!currentVideo) return;
 
         if (controlPanel) {
-            controlPanel.classList.remove('video-assistant-hidden');
+            controlPanel.style.display = 'block';
             return;
         }
 
         controlPanel = document.createElement('div');
-        controlPanel.className = 'video-assistant-control-panel';
+        controlPanel.innerHTML = `
+            <div class="control-panel-content">
+                <div class="control-item" data-action="fullscreen">
+                    <span>全屏播放</span>
+                </div>
+                <div class="control-item" data-action="speed">
+                    <span>倍速选择</span>
+                </div>
+            </div>
+        `;
 
-        const fullscreenItem = createControlItem('全屏播放', () => {
-            debugLog('全屏播放被点击');
-            enterFullscreen();
-            hideControlPanel();
+        controlPanel.style.cssText = `
+            position: fixed;
+            bottom: 130px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 12px;
+            padding: 8px 0;
+            z-index: 10001;
+            min-width: 120px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            display: block;
+        `;
+
+        const content = controlPanel.querySelector('.control-panel-content');
+        content.style.cssText = `
+            color: white;
+            font-size: 14px;
+        `;
+
+        const controlItems = controlPanel.querySelectorAll('.control-item');
+        controlItems.forEach(item => {
+            item.style.cssText = `
+                padding: 12px 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            `;
+            item.addEventListener('mouseenter', () => {
+                item.style.background = 'rgba(255, 255, 255, 0.1)';
+            });
+            item.addEventListener('mouseleave', () => {
+                item.style.background = 'transparent';
+            });
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleControlAction(item.getAttribute('data-action'));
+            });
+            item.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                handleControlAction(item.getAttribute('data-action'));
+            });
         });
 
-        const speedItem = createControlItem('倍速选择', () => {
-            debugLog('倍速选择被点击');
-            showSpeedSelector();
-        });
-
-        const sizeItem = createControlItem('画面尺寸', () => {
-            debugLog('画面尺寸被点击');
-            showSizeSelector();
-        });
-
-        controlPanel.appendChild(fullscreenItem);
-        controlPanel.appendChild(speedItem);
-        controlPanel.appendChild(sizeItem);
+        // 移除最后一个项目的边框
+        controlItems[controlItems.length - 1].style.borderBottom = 'none';
 
         document.body.appendChild(controlPanel);
 
@@ -481,388 +234,693 @@
         }, 100);
     }
 
-    // 创建控制项
-    function createControlItem(text, onClick) {
-        const item = document.createElement('div');
-        item.className = 'video-assistant-control-item';
-        item.textContent = text;
-        item.addEventListener('click', onClick);
-        return item;
-    }
-
     // 隐藏控制面板
     function hideControlPanel() {
-        debugLog('隐藏控制面板');
         if (controlPanel) {
-            controlPanel.classList.add('video-assistant-hidden');
+            controlPanel.style.display = 'none';
         }
     }
 
-    // 进入全屏模式
+    // 处理控制动作
+    function handleControlAction(action) {
+        switch (action) {
+            case 'fullscreen':
+                toggleFullscreen();
+                break;
+            case 'speed':
+                showSpeedSelector();
+                break;
+        }
+        hideControlPanel();
+    }
+
+    // 切换全屏
+    function toggleFullscreen() {
+        if (!currentVideo) return;
+
+        if (!isFullscreen) {
+            enterFullscreen();
+        } else {
+            exitFullscreen();
+        }
+    }
+
+    // 进入全屏
     function enterFullscreen() {
-        if (!currentVideo) {
-            debugLog('无法进入全屏：没有当前视频');
+        if (!currentVideo) return;
+
+        // 保存原始样式
+        originalVideoStyle = {
+            width: currentVideo.style.width,
+            height: currentVideo.style.height,
+            objectFit: currentVideo.style.objectFit,
+            position: currentVideo.style.position,
+            top: currentVideo.style.top,
+            left: currentVideo.style.left,
+            zIndex: currentVideo.style.zIndex
+        };
+
+        // 尝试进入全屏
+        if (currentVideo.requestFullscreen) {
+            currentVideo.requestFullscreen();
+        } else if (currentVideo.webkitRequestFullscreen) {
+            currentVideo.webkitRequestFullscreen();
+        } else if (currentVideo.mozRequestFullScreen) {
+            currentVideo.mozRequestFullScreen();
+        } else if (currentVideo.msRequestFullscreen) {
+            currentVideo.msRequestFullscreen();
+        }
+
+        // 设置全屏样式
+        currentVideo.style.width = '100vw';
+        currentVideo.style.height = '100vh';
+        currentVideo.style.objectFit = 'contain';
+        currentVideo.style.position = 'fixed';
+        currentVideo.style.top = '0';
+        currentVideo.style.left = '0';
+        currentVideo.style.zIndex = '9999';
+
+        // 尝试锁定横屏
+        if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(() => {
+                console.log('横屏锁定失败，使用默认全屏');
+            });
+        }
+
+        isFullscreen = true;
+        showFullscreenControls();
+    }
+
+    // 退出全屏
+    function exitFullscreen() {
+        if (document.exitFullscreen) {
+            document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+        } else if (document.mozCancelFullScreen) {
+            document.mozCancelFullScreen();
+        } else if (document.msExitFullscreen) {
+            document.msExitFullscreen();
+        }
+
+        // 解锁屏幕方向
+        if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+        }
+
+        // 恢复原始样式
+        if (originalVideoStyle && currentVideo) {
+            currentVideo.style.width = originalVideoStyle.width;
+            currentVideo.style.height = originalVideoStyle.height;
+            currentVideo.style.objectFit = originalVideoStyle.objectFit;
+            currentVideo.style.position = originalVideoStyle.position;
+            currentVideo.style.top = originalVideoStyle.top;
+            currentVideo.style.left = originalVideoStyle.left;
+            currentVideo.style.zIndex = originalVideoStyle.zIndex;
+        }
+
+        isFullscreen = false;
+        hideFullscreenControls();
+    }
+
+    // 处理全屏变化
+    function handleFullscreenChange() {
+        const isCurrentlyFullscreen = !!(document.fullscreenElement || 
+                                       document.webkitFullscreenElement || 
+                                       document.mozFullScreenElement || 
+                                       document.msFullscreenElement);
+
+        if (!isCurrentlyFullscreen && isFullscreen) {
+            // 用户通过其他方式退出全屏
+            exitFullscreen();
+        }
+    }
+
+    // 显示全屏控制栏
+    function showFullscreenControls() {
+        if (!currentVideo) return;
+
+        let controls = document.getElementById('video-fullscreen-controls');
+        if (controls) {
+            controls.style.display = 'flex';
             return;
         }
 
-        debugLog('进入全屏模式');
-        isFullscreen = true;
-        originalVideoStyle = currentVideo.style.cssText;
+        controls = document.createElement('div');
+        controls.id = 'video-fullscreen-controls';
+        controls.innerHTML = `
+            <div class="controls-container">
+                <div class="progress-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                </div>
+                <div class="controls-row">
+                    <div class="control-button" id="speed-control">
+                        <span>1.0</span>
+                    </div>
+                    <div class="control-button" id="size-control">
+                        <span>原始</span>
+                    </div>
+                    <div class="control-button" id="exit-fullscreen">
+                        <span>退出</span>
+                    </div>
+                </div>
+            </div>
+        `;
 
-        const overlay = document.createElement('div');
-        overlay.className = 'video-assistant-fullscreen-overlay';
+        controls.style.cssText = `
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.8));
+            padding: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        `;
 
-        const videoClone = currentVideo.cloneNode(true);
-        videoClone.className = 'video-assistant-fullscreen-video';
-        videoClone.controls = false;
+        const container = controls.querySelector('.controls-container');
+        container.style.cssText = `
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-width: 600px;
+            margin: 0 auto;
+            width: 100%;
+        `;
 
-        // 设置视频尺寸适应
-        const isPortrait = currentVideo.videoHeight > currentVideo.videoWidth;
-        if (isPortrait) {
-            videoClone.style.maxHeight = '100%';
-            videoClone.style.width = 'auto';
-        } else {
-            videoClone.style.maxWidth = '100%';
-            videoClone.style.height = 'auto';
-        }
+        // 进度条样式
+        const progressContainer = controls.querySelector('.progress-container');
+        progressContainer.style.cssText = `
+            width: 100%;
+        `;
 
-        overlay.appendChild(videoClone);
-        document.body.appendChild(overlay);
+        const progressBar = controls.querySelector('.progress-bar');
+        progressBar.style.cssText = `
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px;
+            overflow: hidden;
+        `;
 
-        // 播放克隆的视频
-        videoClone.play();
+        const progressFill = controls.querySelector('.progress-fill');
+        progressFill.style.cssText = `
+            width: 0%;
+            height: 100%;
+            background: #ff4444;
+            transition: width 0.1s;
+        `;
 
-        // 创建全屏控制栏
-        createFullscreenControls(overlay, videoClone);
+        // 控制按钮行样式
+        const controlsRow = controls.querySelector('.controls-row');
+        controlsRow.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        `;
 
-        // 退出全屏事件
-        const exitFullscreen = () => {
-            debugLog('退出全屏模式');
-            isFullscreen = false;
-            document.body.removeChild(overlay);
-            if (currentVideo) {
-                currentVideo.style.cssText = originalVideoStyle;
-                currentVideo.play();
-            }
-        };
+        const controlButtons = controls.querySelectorAll('.control-button');
+        controlButtons.forEach(button => {
+            button.style.cssText = `
+                padding: 8px 16px;
+                background: rgba(255, 255, 255, 0.2);
+                border-radius: 20px;
+                color: white;
+                font-size: 14px;
+                cursor: pointer;
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(255, 255, 255, 0.3);
+                min-width: 60px;
+                text-align: center;
+                transition: all 0.2s;
+            `;
 
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
-                exitFullscreen();
-            }
+            button.addEventListener('mouseenter', () => {
+                button.style.background = 'rgba(255, 255, 255, 0.3)';
+            });
+            button.addEventListener('mouseleave', () => {
+                button.style.background = 'rgba(255, 255, 255, 0.2)';
+            });
         });
 
-        // ESC键退出
-        document.addEventListener('keydown', function escHandler(e) {
-            if (e.key === 'Escape') {
-                exitFullscreen();
-                document.removeEventListener('keydown', escHandler);
-            }
-        });
-    }
+        // 事件监听
+        controls.querySelector('#speed-control').addEventListener('click', showSpeedDropdown);
+        controls.querySelector('#size-control').addEventListener('click', showSizeDropdown);
+        controls.querySelector('#exit-fullscreen').addEventListener('click', exitFullscreen);
 
-    // 创建全屏控制栏
-    function createFullscreenControls(overlay, video) {
-        fullscreenControls = document.createElement('div');
-        fullscreenControls.className = 'video-assistant-fullscreen-controls';
-
-        // 进度条
-        const progressBar = document.createElement('div');
-        progressBar.className = 'video-assistant-progress-bar';
-        const progressFilled = document.createElement('div');
-        progressFilled.className = 'video-assistant-progress-filled';
-        progressBar.appendChild(progressFilled);
+        document.body.appendChild(controls);
 
         // 更新进度条
-        const updateProgress = () => {
-            if (video.duration) {
-                const progress = (video.currentTime / video.duration) * 100;
-                progressFilled.style.width = `${progress}%`;
+        updateProgressBar();
+    }
+
+    // 隐藏全屏控制栏
+    function hideFullscreenControls() {
+        const controls = document.getElementById('video-fullscreen-controls');
+        if (controls) {
+            controls.remove();
+        }
+    }
+
+    // 更新进度条
+    function updateProgressBar() {
+        if (!currentVideo) return;
+
+        const progressFill = document.querySelector('.progress-fill');
+        if (!progressFill) return;
+
+        const update = () => {
+            if (currentVideo.duration) {
+                const progress = (currentVideo.currentTime / currentVideo.duration) * 100;
+                progressFill.style.width = `${progress}%`;
             }
         };
 
-        video.addEventListener('timeupdate', updateProgress);
-
-        // 点击进度条跳转
-        progressBar.addEventListener('click', (e) => {
-            const rect = progressBar.getBoundingClientRect();
-            const percent = (e.clientX - rect.left) / rect.width;
-            video.currentTime = percent * video.duration;
-        });
-
-        // 倍速按钮
-        const speedButton = document.createElement('button');
-        speedButton.className = 'video-assistant-control-button';
-        speedButton.textContent = `${video.playbackRate}x`;
-
-        speedButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showSpeedDropdown(speedButton, video);
-        });
-
-        // 尺寸按钮
-        const sizeButton = document.createElement('button');
-        sizeButton.className = 'video-assistant-control-button';
-        sizeButton.textContent = '原始';
-
-        sizeButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showSizeDropdown(sizeButton, video);
-        });
-
-        // 退出按钮（手机端专用）
-        const exitButton = document.createElement('button');
-        exitButton.className = 'video-assistant-control-button';
-        exitButton.textContent = '退出';
-        exitButton.style.background = 'rgba(255, 68, 68, 0.8)';
-
-        exitButton.addEventListener('click', (e) => {
-            e.stopPropagation();
-            isFullscreen = false;
-            document.body.removeChild(overlay);
-            if (currentVideo) {
-                currentVideo.style.cssText = originalVideoStyle;
-                currentVideo.play();
-            }
-        });
-
-        // 双击退出功能
-        let lastTap = 0;
-        overlay.addEventListener('touchend', (e) => {
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTap;
-            if (tapLength < 300 && tapLength > 0) {
-                // 双击退出
-                isFullscreen = false;
-                document.body.removeChild(overlay);
-                if (currentVideo) {
-                    currentVideo.style.cssText = originalVideoStyle;
-                    currentVideo.play();
-                }
-            }
-            lastTap = currentTime;
-        });
-
-        const controlGroup = document.createElement('div');
-        controlGroup.className = 'video-assistant-control-group';
-        controlGroup.appendChild(speedButton);
-        controlGroup.appendChild(sizeButton);
-        controlGroup.appendChild(exitButton);
-
-        fullscreenControls.appendChild(progressBar);
-        fullscreenControls.appendChild(controlGroup);
-        overlay.appendChild(fullscreenControls);
-
-        debugLog('全屏控制栏已创建');
-    }
-
-    // 显示倍速下拉菜单
-    function showSpeedDropdown(button, video) {
-        debugLog('显示倍速下拉菜单');
-
-        const existingDropdown = document.querySelector('.video-assistant-dropdown');
-        if (existingDropdown) {
-            document.body.removeChild(existingDropdown);
-        }
-
-        const dropdown = document.createElement('div');
-        dropdown.className = 'video-assistant-dropdown';
-
-        const rect = button.getBoundingClientRect();
-        dropdown.style.left = `${rect.left}px`;
-        dropdown.style.bottom = `${window.innerHeight - rect.top}px`;
-
-        CONFIG.playbackRates.forEach(rate => {
-            const item = document.createElement('div');
-            item.className = 'video-assistant-dropdown-item';
-            item.textContent = `${rate}x`;
-            if (video.playbackRate === rate) {
-                item.style.background = 'rgba(255, 255, 255, 0.2)';
-            }
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                video.playbackRate = rate;
-                button.textContent = `${rate}x`;
-                document.body.removeChild(dropdown);
-                debugLog(`设置播放倍速: ${rate}x`);
-            });
-            dropdown.appendChild(item);
-        });
-
-        document.body.appendChild(dropdown);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', () => {
-                if (document.body.contains(dropdown)) {
-                    document.body.removeChild(dropdown);
-                }
-            }, { once: true });
-        }, 100);
-    }
-
-    // 显示尺寸下拉菜单
-    function showSizeDropdown(button, video) {
-        debugLog('显示尺寸下拉菜单');
-
-        const existingDropdown = document.querySelector('.video-assistant-dropdown');
-        if (existingDropdown) {
-            document.body.removeChild(existingDropdown);
-        }
-
-        const dropdown = document.createElement('div');
-        dropdown.className = 'video-assistant-dropdown';
-
-        const rect = button.getBoundingClientRect();
-        dropdown.style.left = `${rect.left}px`;
-        dropdown.style.bottom = `${window.innerHeight - rect.top}px`;
-
-        CONFIG.videoSizes.forEach(size => {
-            const item = document.createElement('div');
-            item.className = 'video-assistant-dropdown-item';
-            item.textContent = size.name;
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                applyVideoSize(video, size.value);
-                button.textContent = size.name;
-                document.body.removeChild(dropdown);
-                debugLog(`设置画面尺寸: ${size.name}`);
-            });
-            dropdown.appendChild(item);
-        });
-
-        document.body.appendChild(dropdown);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', () => {
-                if (document.body.contains(dropdown)) {
-                    document.body.removeChild(dropdown);
-                }
-            }, { once: true });
-        }, 100);
-    }
-
-    // 应用视频尺寸
-    function applyVideoSize(video, size) {
-        debugLog(`应用视频尺寸: ${size}`);
-
-        switch (size) {
-            case 'fill':
-                video.style.objectFit = 'fill';
-                break;
-            case 'stretch':
-                video.style.objectFit = 'none';
-                video.style.width = '100%';
-                video.style.height = '100%';
-                break;
-            case 'fit':
-                video.style.objectFit = 'contain';
-                break;
-            case 'original':
-                video.style.objectFit = 'none';
-                video.style.width = 'auto';
-                video.style.height = 'auto';
-                break;
-        }
+        currentVideo.addEventListener('timeupdate', update);
+        update();
     }
 
     // 显示倍速选择器
     function showSpeedSelector() {
-        debugLog('显示倍速选择器');
+        if (!currentVideo) return;
 
-        const existingDropdown = document.querySelector('.video-assistant-dropdown');
-        if (existingDropdown) {
-            document.body.removeChild(existingDropdown);
+        let selector = document.getElementById('speed-selector');
+        if (selector) {
+            selector.style.display = 'block';
+            return;
         }
 
-        const dropdown = document.createElement('div');
-        dropdown.className = 'video-assistant-dropdown';
+        selector = document.createElement('div');
+        selector.id = 'speed-selector';
+        selector.innerHTML = `
+            <div class="selector-content">
+                <div class="selector-header">
+                    <span>播放速度</span>
+                </div>
+                <div class="selector-options">
+                    ${CONFIG.speeds.map(speed => `
+                        <div class="option" data-speed="${speed}">
+                            <span>${speed}x</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
 
-        const rect = controlPanel.getBoundingClientRect();
-        dropdown.style.left = `${rect.left}px`;
-        dropdown.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+        selector.style.cssText = `
+            position: fixed;
+            bottom: 130px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 12px;
+            padding: 0;
+            z-index: 10002;
+            min-width: 100px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            display: block;
+        `;
 
-        CONFIG.playbackRates.forEach(rate => {
-            const item = document.createElement('div');
-            item.className = 'video-assistant-dropdown-item';
-            item.textContent = `${rate}x`;
-            if (currentVideo && currentVideo.playbackRate === rate) {
-                item.style.background = 'rgba(255, 255, 255, 0.2)';
-            }
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentVideo) {
-                    currentVideo.playbackRate = rate;
-                    debugLog(`设置播放倍速: ${rate}x`);
-                }
-                document.body.removeChild(dropdown);
-                hideControlPanel();
+        const content = selector.querySelector('.selector-content');
+        content.style.cssText = `
+            color: white;
+        `;
+
+        const header = selector.querySelector('.selector-header');
+        header.style.cssText = `
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-weight: bold;
+            font-size: 14px;
+        `;
+
+        const options = selector.querySelector('.selector-options');
+        options.style.cssText = `
+            max-height: 200px;
+            overflow-y: auto;
+        `;
+
+        const optionElements = selector.querySelectorAll('.option');
+        optionElements.forEach(option => {
+            option.style.cssText = `
+                padding: 12px 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                font-size: 14px;
+            `;
+
+            option.addEventListener('mouseenter', () => {
+                option.style.background = 'rgba(255, 255, 255, 0.1)';
             });
-            dropdown.appendChild(item);
+            option.addEventListener('mouseleave', () => {
+                option.style.background = 'transparent';
+            });
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const speed = parseFloat(option.getAttribute('data-speed'));
+                setPlaybackSpeed(speed);
+                selector.style.display = 'none';
+            });
+            option.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const speed = parseFloat(option.getAttribute('data-speed'));
+                setPlaybackSpeed(speed);
+                selector.style.display = 'none';
+            });
         });
 
-        document.body.appendChild(dropdown);
+        // 移除最后一个选项的边框
+        optionElements[optionElements.length - 1].style.borderBottom = 'none';
+
+        document.body.appendChild(selector);
 
         // 点击外部关闭
         setTimeout(() => {
             document.addEventListener('click', () => {
-                if (document.body.contains(dropdown)) {
-                    document.body.removeChild(dropdown);
-                }
+                selector.style.display = 'none';
             }, { once: true });
         }, 100);
     }
 
-    // 显示尺寸选择器
-    function showSizeSelector() {
-        debugLog('显示尺寸选择器');
+    // 显示倍速下拉菜单（全屏模式）
+    function showSpeedDropdown() {
+        if (!currentVideo) return;
 
-        const existingDropdown = document.querySelector('.video-assistant-dropdown');
-        if (existingDropdown) {
-            document.body.removeChild(existingDropdown);
+        let dropdown = document.getElementById('speed-dropdown');
+        if (dropdown) {
+            dropdown.style.display = 'block';
+            return;
         }
 
-        const dropdown = document.createElement('div');
-        dropdown.className = 'video-assistant-dropdown';
+        dropdown = document.createElement('div');
+        dropdown.id = 'speed-dropdown';
+        dropdown.innerHTML = `
+            <div class="dropdown-content">
+                ${CONFIG.speeds.map(speed => `
+                    <div class="dropdown-option" data-speed="${speed}">
+                        <span>${speed}x</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
 
-        const rect = controlPanel.getBoundingClientRect();
-        dropdown.style.left = `${rect.left}px`;
-        dropdown.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+        dropdown.style.cssText = `
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 12px;
+            padding: 8px 0;
+            z-index: 10003;
+            min-width: 80px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            display: block;
+        `;
 
-        CONFIG.videoSizes.forEach(size => {
-            const item = document.createElement('div');
-            item.className = 'video-assistant-dropdown-item';
-            item.textContent = size.name;
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (currentVideo) {
-                    applyVideoSize(currentVideo, size.value);
-                    debugLog(`设置画面尺寸: ${size.name}`);
-                }
-                document.body.removeChild(dropdown);
-                hideControlPanel();
+        const content = dropdown.querySelector('.dropdown-content');
+        content.style.cssText = `
+            color: white;
+        `;
+
+        const options = dropdown.querySelectorAll('.dropdown-option');
+        options.forEach(option => {
+            option.style.cssText = `
+                padding: 10px 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                font-size: 14px;
+                text-align: center;
+            `;
+
+            option.addEventListener('mouseenter', () => {
+                option.style.background = 'rgba(255, 255, 255, 0.1)';
             });
-            dropdown.appendChild(item);
+            option.addEventListener('mouseleave', () => {
+                option.style.background = 'transparent';
+            });
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const speed = parseFloat(option.getAttribute('data-speed'));
+                setPlaybackSpeed(speed);
+                dropdown.style.display = 'none';
+            });
         });
+
+        // 移除最后一个选项的边框
+        options[options.length - 1].style.borderBottom = 'none';
 
         document.body.appendChild(dropdown);
 
         // 点击外部关闭
         setTimeout(() => {
             document.addEventListener('click', () => {
-                if (document.body.contains(dropdown)) {
-                    document.body.removeChild(dropdown);
-                }
+                dropdown.style.display = 'none';
             }, { once: true });
         }, 100);
+    }
+
+    // 显示画面尺寸选择器
+    function showSizeSelector() {
+        if (!currentVideo) return;
+
+        let selector = document.getElementById('size-selector');
+        if (selector) {
+            selector.style.display = 'block';
+            return;
+        }
+
+        selector = document.createElement('div');
+        selector.id = 'size-selector';
+        selector.innerHTML = `
+            <div class="selector-content">
+                <div class="selector-header">
+                    <span>画面尺寸</span>
+                </div>
+                <div class="selector-options">
+                    ${CONFIG.sizes.map(size => `
+                        <div class="option" data-size="${size.value}">
+                            <span>${size.name}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        selector.style.cssText = `
+            position: fixed;
+            bottom: 130px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 12px;
+            padding: 0;
+            z-index: 10002;
+            min-width: 100px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            display: block;
+        `;
+
+        const content = selector.querySelector('.selector-content');
+        content.style.cssText = `
+            color: white;
+        `;
+
+        const header = selector.querySelector('.selector-header');
+        header.style.cssText = `
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-weight: bold;
+            font-size: 14px;
+        `;
+
+        const options = selector.querySelector('.selector-options');
+        options.style.cssText = `
+            max-height: 200px;
+            overflow-y: auto;
+        `;
+
+        const optionElements = selector.querySelectorAll('.option');
+        optionElements.forEach(option => {
+            option.style.cssText = `
+                padding: 12px 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                font-size: 14px;
+            `;
+
+            option.addEventListener('mouseenter', () => {
+                option.style.background = 'rgba(255, 255, 255, 0.1)';
+            });
+            option.addEventListener('mouseleave', () => {
+                option.style.background = 'transparent';
+            });
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const size = option.getAttribute('data-size');
+                const sizeName = option.querySelector('span').textContent;
+                applyVideoSize(size, sizeName);
+                selector.style.display = 'none';
+            });
+            option.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const size = option.getAttribute('data-size');
+                const sizeName = option.querySelector('span').textContent;
+                applyVideoSize(size, sizeName);
+                selector.style.display = 'none';
+            });
+        });
+
+        // 移除最后一个选项的边框
+        optionElements[optionElements.length - 1].style.borderBottom = 'none';
+
+        document.body.appendChild(selector);
+
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', () => {
+                selector.style.display = 'none';
+            }, { once: true });
+        }, 100);
+    }
+
+    // 显示画面尺寸下拉菜单（全屏模式）
+    function showSizeDropdown() {
+        if (!currentVideo) return;
+
+        let dropdown = document.getElementById('size-dropdown');
+        if (dropdown) {
+            dropdown.style.display = 'block';
+            return;
+        }
+
+        dropdown = document.createElement('div');
+        dropdown.id = 'size-dropdown';
+        dropdown.innerHTML = `
+            <div class="dropdown-content">
+                ${CONFIG.sizes.map(size => `
+                    <div class="dropdown-option" data-size="${size.value}">
+                        <span>${size.name}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        dropdown.style.cssText = `
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 12px;
+            padding: 8px 0;
+            z-index: 10003;
+            min-width: 80px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            display: block;
+        `;
+
+        const content = dropdown.querySelector('.dropdown-content');
+        content.style.cssText = `
+            color: white;
+        `;
+
+        const options = dropdown.querySelectorAll('.dropdown-option');
+        options.forEach(option => {
+            option.style.cssText = `
+                padding: 10px 16px;
+                cursor: pointer;
+                transition: background 0.2s;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                font-size: 14px;
+                text-align: center;
+            `;
+
+            option.addEventListener('mouseenter', () => {
+                option.style.background = 'rgba(255, 255, 255, 0.1)';
+            });
+            option.addEventListener('mouseleave', () => {
+                option.style.background = 'transparent';
+            });
+            option.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const size = option.getAttribute('data-size');
+                const sizeName = option.querySelector('span').textContent;
+                applyVideoSize(size, sizeName);
+                dropdown.style.display = 'none';
+            });
+        });
+
+        // 移除最后一个选项的边框
+        options[options.length - 1].style.borderBottom = 'none';
+
+        document.body.appendChild(dropdown);
+
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', () => {
+                dropdown.style.display = 'none';
+            }, { once: true });
+        }, 100);
+    }
+
+    // 设置播放速度
+    function setPlaybackSpeed(speed) {
+        if (!currentVideo) return;
+
+        currentVideo.playbackRate = speed;
+        
+        // 更新控制面板显示
+        const speedControl = document.querySelector('#speed-control span');
+        if (speedControl) {
+            speedControl.textContent = `${speed}`;
+        }
+
+        console.log(`播放速度设置为: ${speed}x`);
+    }
+
+    // 应用画面尺寸
+    function applyVideoSize(size, sizeName) {
+        if (!currentVideo) return;
+
+        switch (size) {
+            case 'fill':
+                currentVideo.style.objectFit = 'fill';
+                break;
+            case 'stretch':
+                currentVideo.style.objectFit = 'none';
+                currentVideo.style.width = '100%';
+                currentVideo.style.height = '100%';
+                break;
+            case 'contain':
+                currentVideo.style.objectFit = 'contain';
+                break;
+            case 'none':
+                currentVideo.style.objectFit = 'none';
+                currentVideo.style.width = 'auto';
+                currentVideo.style.height = 'auto';
+                break;
+        }
+
+        // 更新控制面板显示
+        const sizeControl = document.querySelector('#size-control span');
+        if (sizeControl) {
+            sizeControl.textContent = sizeName;
+        }
+
+        console.log(`画面尺寸设置为: ${sizeName}`);
     }
 
     // 启动脚本
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-
+    init();
 })();
