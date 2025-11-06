@@ -11,38 +11,46 @@
 (function() {
     'use strict';
 
-    // 创建悬浮四叶草按钮
+    // 创建悬浮四叶草按钮（移动端优化）
     function createFloatingButton() {
         const button = document.createElement('div');
         button.innerHTML = `
             <style>
                 .video-assistant-btn {
                     position: fixed;
-                    right: 20px;
-                    bottom: 20px;
-                    width: 50px;
-                    height: 50px;
+                    right: 15px;
+                    bottom: 15px;
+                    width: 60px;
+                    height: 60px;
                     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     border-radius: 50%;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     cursor: pointer;
-                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+                    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
                     z-index: 10000;
                     transition: all 0.3s ease;
                     opacity: 0;
                     transform: scale(0.8);
+                    touch-action: manipulation;
+                    -webkit-tap-highlight-color: transparent;
+                    user-select: none;
                 }
                 
                 .video-assistant-btn:hover {
                     transform: scale(1.1);
-                    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+                    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
                 }
                 
                 .video-assistant-btn.show {
                     opacity: 1;
                     transform: scale(1);
+                }
+                
+                /* 移动端触摸优化 */
+                .video-assistant-btn:active {
+                    transform: scale(0.95);
                 }
                 
                 .video-assistant-btn::before,
@@ -206,33 +214,53 @@
     // 获取当前页面中的视频元素（增强兼容性）
     function getVideoElements() {
         let videos = document.querySelectorAll('video');
+        console.log(`找到 ${videos.length} 个标准视频元素`);
         
         // 如果当前页面没有视频，检查iframe中的视频
         if (videos.length === 0) {
             const iframes = document.querySelectorAll('iframe');
+            console.log(`找到 ${iframes.length} 个iframe元素`);
             iframes.forEach(iframe => {
                 try {
                     // 尝试访问iframe内的视频元素
                     const iframeVideos = iframe.contentDocument?.querySelectorAll('video');
                     if (iframeVideos && iframeVideos.length > 0) {
+                        console.log(`在iframe中找到 ${iframeVideos.length} 个视频元素`);
                         videos = Array.from(videos).concat(Array.from(iframeVideos));
                     }
                 } catch (e) {
                     // 跨域限制，无法访问iframe内容
-                    console.log('无法访问iframe内容:', e);
+                    console.log('无法访问iframe内容（跨域限制）:', e);
                 }
             });
         }
         
-        // 尝试检测YouTube视频
-        if (videos.length === 0 && window.location.hostname.includes('youtube.com')) {
+        // 尝试检测YouTube视频（增强检测）
+        if (videos.length === 0 && (window.location.hostname.includes('youtube.com') || 
+                                   window.location.hostname.includes('youtu.be'))) {
+            console.log('检测到YouTube网站，尝试查找YouTube视频元素');
             const youtubeVideo = document.querySelector('#movie_player video') || 
-                                document.querySelector('.html5-video-player video');
+                                document.querySelector('.html5-video-player video') ||
+                                document.querySelector('video.html5-main-video') ||
+                                document.querySelector('video.video-stream');
             if (youtubeVideo) {
+                console.log('找到YouTube视频元素:', youtubeVideo);
                 videos = [youtubeVideo];
+            } else {
+                console.log('未找到YouTube视频元素');
             }
         }
         
+        // 过滤掉不可用的视频元素
+        videos = Array.from(videos).filter(video => {
+            const isValid = video && video.tagName === 'VIDEO' && video.readyState > 0;
+            if (!isValid) {
+                console.log('过滤掉无效视频元素:', video);
+            }
+            return isValid;
+        });
+        
+        console.log(`最终可用视频元素: ${videos.length}`);
         return videos;
     }
 
@@ -354,76 +382,136 @@
         }
     }
 
-    // 初始化事件监听
+    // 初始化事件监听（适配移动端）
     function initEventListeners() {
-        // 悬浮按钮点击事件
-        document.addEventListener('click', function(e) {
-            if (e.target.closest('.video-assistant-btn')) {
+        console.log('初始化事件监听器（移动端适配）...');
+        console.log('用户代理:', navigator.userAgent);
+        console.log('触摸支持:', 'ontouchstart' in window);
+        
+        // 移除可能重复的事件监听器
+        document.removeEventListener('click', handleDocumentClick);
+        document.removeEventListener('touchstart', handleDocumentTouch);
+        
+        // 处理触摸和点击事件
+        function handleDocumentInteraction(e) {
+            const target = e.target;
+            console.log('交互事件:', e.type, target);
+            
+            if (target.closest('.video-assistant-btn')) {
+                console.log('点击/触摸悬浮按钮');
+                e.preventDefault();
+                e.stopPropagation();
                 toggleSettingsPanel();
+                return;
             }
             
-            if (e.target.closest('.close-btn')) {
+            if (target.closest('.close-btn')) {
+                console.log('点击/触摸关闭按钮');
+                e.preventDefault();
+                e.stopPropagation();
                 const panel = document.querySelector('.video-settings-panel');
                 if (panel) {
                     panel.classList.remove('show');
                 }
+                return;
             }
             
-            // 倍速按钮点击
-            if (e.target.classList.contains('speed-btn')) {
-                const speed = e.target.getAttribute('data-speed');
+            // 倍速按钮点击/触摸
+            if (target.classList.contains('speed-btn')) {
+                const speed = target.getAttribute('data-speed');
+                console.log('设置播放速度:', speed);
+                e.preventDefault();
+                e.stopPropagation();
                 setPlaybackSpeed(speed);
+                return;
             }
             
-            // 尺寸按钮点击
-            if (e.target.classList.contains('size-btn')) {
-                const size = e.target.getAttribute('data-size');
+            // 尺寸按钮点击/触摸
+            if (target.classList.contains('size-btn')) {
+                const size = target.getAttribute('data-size');
+                console.log('设置画面尺寸:', size);
+                e.preventDefault();
+                e.stopPropagation();
                 setVideoSize(size);
+                return;
             }
             
-            // 全屏按钮点击
-            if (e.target.classList.contains('fullscreen-btn')) {
+            // 全屏按钮点击/触摸
+            if (target.classList.contains('fullscreen-btn')) {
+                console.log('切换全屏模式');
+                e.preventDefault();
+                e.stopPropagation();
                 toggleFullscreen();
+                return;
             }
-        });
-        
-        // 点击面板外部关闭面板
-        document.addEventListener('click', function(e) {
+            
+            // 点击/触摸面板外部关闭面板
             const panel = document.querySelector('.video-settings-panel');
             const btn = document.querySelector('.video-assistant-btn');
             
             if (panel && panel.classList.contains('show') && 
-                !panel.contains(e.target) && 
-                !btn.contains(e.target)) {
+                !panel.contains(target) && 
+                !(btn && btn.contains(target))) {
+                console.log('点击/触摸面板外部，关闭面板');
                 panel.classList.remove('show');
             }
-        });
+        }
         
-        // 监听视频播放事件
-        document.addEventListener('play', function(e) {
+        // 点击事件处理
+        function handleDocumentClick(e) {
+            handleDocumentInteraction(e);
+        }
+        
+        // 触摸事件处理（移动端）
+        function handleDocumentTouch(e) {
+            handleDocumentInteraction(e);
+        }
+        
+        // 同时监听点击和触摸事件
+        document.addEventListener('click', handleDocumentClick);
+        document.addEventListener('touchstart', handleDocumentTouch, { passive: false });
+        
+        // 监听视频播放事件（增强兼容性）
+        function handleVideoPlay(e) {
+            console.log('视频播放事件:', e.target);
             if (e.target.tagName === 'VIDEO') {
                 showFloatingButton();
             }
-        }, true);
+        }
         
-        // 监听视频暂停事件
-        document.addEventListener('pause', function(e) {
+        function handleVideoPause(e) {
+            console.log('视频暂停事件:', e.target);
             if (e.target.tagName === 'VIDEO') {
                 // 延迟隐藏，避免频繁切换
                 setTimeout(() => {
                     const videos = getVideoElements();
                     const anyPlaying = Array.from(videos).some(video => !video.paused);
+                    console.log('检查是否有视频播放:', anyPlaying);
                     if (!anyPlaying) {
                         hideFloatingButton();
                     }
                 }, 2000);
             }
-        }, true);
+        }
         
-        // 监听页面卸载事件
-        window.addEventListener('beforeunload', function() {
-            hideFloatingButton();
-        });
+        // 为现有视频添加事件监听
+        function addVideoEventListeners() {
+            const videos = getVideoElements();
+            videos.forEach(video => {
+                video.removeEventListener('play', handleVideoPlay);
+                video.removeEventListener('pause', handleVideoPause);
+                video.addEventListener('play', handleVideoPlay);
+                video.addEventListener('pause', handleVideoPause);
+            });
+        }
+        
+        // 初始添加事件监听
+        addVideoEventListeners();
+        
+        // 定期为动态加载的视频添加事件监听
+        setInterval(addVideoEventListeners, 3000);
+        
+        console.log('事件监听器初始化完成');
     }
 
     // 检测页面中的视频元素（定期检查，处理动态加载的视频）
