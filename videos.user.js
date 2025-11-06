@@ -1,481 +1,259 @@
 // ==UserScript==
-// @name         网页视频播放助手
+// @name         华为浏览器风格视频助手（Edge 移动版专用）
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
-// @description  手机浏览器视频播放助手，支持全屏、倍速、画面比例调整
-// @author       Your Name
+// @version      1.2.0
 // @match        *://*/*
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
 
-(function() {
-    'use strict';
+(function () {
+  'use strict';
 
-    let currentVideo = null;
-    let floatingButton = null;
-    let controlPanel = null;
-    let isFullscreen = false;
-    let originalContainer = null;
+  /* ========== 工具函数 ========== */
+  const $ = (s, p = document) => p.querySelector(s);
 
-    // 倍速选项
-    const playbackRates = [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0];
-    
-    // 画面比例选项
-    const aspectRatios = {
-        '填充': 'fill',
-        '拉伸': 'stretch',
-        '适应': 'contain',
-        '原始': 'original'
+  const ratio = (v) => v.videoWidth / v.videoHeight;          // 真实比例
+  const isPortraitVideo = (v) => ratio(v) <= 1.05;            // 竖屏阈值
+  const isLandscapeVideo = (v) => ratio(v) >= 1.35;           // 横屏阈值
+
+  const lockOrient = (lock = true, mode = 'natural') => {
+    if (!screen.orientation) return Promise.resolve();
+    if (!lock) return screen.orientation.unlock();
+    const m = mode === 'land' ? 'landscape' :
+              mode === 'port' ? 'portrait'   :
+              screen.orientation.angle === 0 || screen.orientation.angle === 180
+                ? 'landscape' : 'portrait';
+    return screen.orientation.lock(m).catch(() => {});
+  };
+
+  /* ========== 悬浮四叶草按钮 ========== */
+  let cloverBtn = null;
+  function ensureClover() {
+    if (cloverBtn) return cloverBtn;
+    cloverBtn = document.createElement('div');
+    cloverBtn.innerHTML = '🍀';
+    Object.assign(cloverBtn.style, {
+      position: 'fixed', zIndex: 10000,
+      right: '20px', bottom: '80px',
+      width: '48px', height: '48px',
+      background: 'rgba(0,0,0,.8)', borderRadius: '50%',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: '#fff', fontSize: '24px', boxShadow: '0 2px 8px rgba(0,0,0,.4)',
+      transition: 'transform .2s', userSelect: 'none'
+    });
+    document.body.appendChild(cloverBtn);
+
+    /* 拖拽 */
+    let dx, dy, ox, oy;
+    const onTouch = (e) => {
+      const t = e.touches[0];
+      dx = t.clientX - cloverBtn.offsetLeft;
+      dy = t.clientY - cloverBtn.offsetTop;
     };
+    const onMove = (e) => {
+      const t = e.touches[0];
+      cloverBtn.style.left = (t.clientX - dx) + 'px';
+      cloverBtn.style.top  = (t.clientY - dy) + 'px';
+      cloverBtn.style.right = 'auto';
+      cloverBtn.style.bottom = 'auto';
+    };
+    cloverBtn.addEventListener('touchstart', onTouch, {passive: true});
+    document.addEventListener('touchmove', onMove, {passive: true});
+    return cloverBtn;
+  }
 
-    // 创建悬浮按钮
-    function createFloatingButton() {
-        if (floatingButton) return;
+  /* ========== 控制面板 ========== */
+  let panel = null;
+  function togglePanel() {
+    if (!panel) createPanel();
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  }
 
-        floatingButton = document.createElement('div');
-        floatingButton.innerHTML = '🍀';
-        floatingButton.style.cssText = `
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 48px;
-            height: 48px;
-            background: rgba(0, 0, 0, 0.8);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            color: white;
-            z-index: 10000;
-            cursor: pointer;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-        `;
+  function createPanel() {
+    panel = document.createElement('div');
+    panel.style.cssText = `
+      position:fixed; right:20px; bottom:140px; z-index:10001;
+      background:rgba(0,0,0,.9); border-radius:12px; padding:12px;
+      min-width:180px; display:none; box-shadow:0 4px 16px rgba(0,0,0,.5);
+    `;
+    panel.innerHTML = `
+      <div style="color:#fff;font-size:14px;margin-bottom:10px">播放设置</div>
+      <button id="vp-full" style="width:100%;margin-bottom:8px">全屏播放</button>
+      <button id="vp-speed" style="width:100%;margin-bottom:8px">倍速选择</button>
+      <button id="vp-size" style="width:100%">画面尺寸</button>
+    `;
+    document.body.appendChild(panel);
+    $('#vp-full').onclick  = enterSmartFullscreen;
+    $('#vp-speed').onclick = () => showSpeedMenu();
+    $('#vp-size').onclick  = () => showSizeMenu();
+  }
 
-        floatingButton.addEventListener('click', toggleControlPanel);
-        document.body.appendChild(floatingButton);
+  /* ========== 智能全屏 ========== */
+  let oriParent = null, oriStyle = '';
+  let fsWrap = null;
+  let currVid = null;
 
-        // 添加拖拽功能
-        let isDragging = false;
-        let startX, startY, initialX, initialY;
+  function enterSmartFullscreen() {
+    const v = currVid;
+    if (!v) return;
+    oriParent = v.parentNode;
+    oriStyle  = v.style.cssText;
 
-        floatingButton.addEventListener('touchstart', (e) => {
-            isDragging = true;
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            initialX = floatingButton.offsetLeft;
-            initialY = floatingButton.offsetTop;
-        });
+    /* 1. 根据视频比例决定方向 */
+    const want = isLandscapeVideo(v) ? 'land' : 'port';
+    lockOrient(true, want);
 
-        document.addEventListener('touchmove', (e) => {
-            if (!isDragging) return;
-            e.preventDefault();
-            const deltaX = e.touches[0].clientX - startX;
-            const deltaY = e.touches[0].clientY - startY;
-            floatingButton.style.left = (initialX + deltaX) + 'px';
-            floatingButton.style.top = (initialY + deltaY) + 'px';
-            floatingButton.style.right = 'auto';
-            floatingButton.style.bottom = 'auto';
-        });
+    /* 2. 创建全屏容器 */
+    fsWrap = document.createElement('div');
+    fsWrap.className = 'vp-fs-wrap';
+    Object.assign(fsWrap.style, {
+      position: 'fixed', left: 0, top: 0, width: '100vw', height: '100vh',
+      background: '#000', zIndex: 999999,
+      display: 'flex', alignItems: 'center', justifyContent: 'center'
+    });
 
-        document.addEventListener('touchend', () => {
-            isDragging = false;
-        });
+    /* 3. 移入视频 */
+    fsWrap.appendChild(v);
+    document.body.appendChild(fsWrap);
+    v.style.cssText = 'width:100%;height:100%;object-fit:contain';
+
+    /* 4. 底部控制栏 */
+    buildFSBar(fsWrap, v);
+
+    /* 5. Edge 返回手势拦截 */
+    history.pushState({vpFs: true}, '');
+    window.addEventListener('popstate', onBackWhileFS);
+  }
+
+  function exitSmartFullscreen() {
+    if (!fsWrap) return;
+    lockOrient(false);
+    window.removeEventListener('popstate', onBackWhileFS);
+    if (history.state && history.state.vpFs) history.back(); // 清掉我们压的栈
+
+    /* 恢复视频 */
+    const v = currVid;
+    oriParent.appendChild(v);
+    v.style.cssText = oriStyle;
+    fsWrap.remove();
+    fsWrap = null;
+  }
+
+  function onBackWhileFS(e) {
+    if (fsWrap) {               // 处于全屏
+      e.preventDefault();
+      exitSmartFullscreen();
     }
+  }
 
-    // 创建控制面板
-    function createControlPanel() {
-        if (controlPanel) return;
+  /* ========== 全屏底部控制栏 ========== */
+  function buildFSBar(container, v) {
+    const bar = document.createElement('div');
+    bar.className = 'vp-fs-bar';
+    Object.assign(bar.style, {
+      position: 'absolute', left: '50%', bottom: '20px', transform: 'translateX(-50%)',
+      background: 'rgba(0,0,0,.7)', borderRadius: '20px', padding: '8px 16px',
+      display: 'flex', alignItems: 'center', gap: '12px', zIndex: 1000000
+    });
+    bar.innerHTML = `
+      <span id="vp-time" style="color:#fff;font-size:12px">0:00 / 0:00</span>
+      <input type="range" id="vp-prog" style="width:140px" min="0" max="100" value="0">
+      <button id="vp-rate" style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:12px">1.0x</button>
+      <button id="vp-scale" style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:12px">原始</button>
+      <button id="vp-exit" style="background:rgba(255,255,255,.2);color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:12px">退出</button>
+    `;
+    container.appendChild(bar);
 
-        controlPanel = document.createElement('div');
-        controlPanel.style.cssText = `
-            position: fixed;
-            bottom: 80px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.9);
-            border-radius: 12px;
-            padding: 16px;
-            z-index: 10001;
-            display: none;
-            min-width: 200px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-        `;
+    /* 事件 */
+    const prog = $('#vp-prog', bar);
+    prog.oninput = () => v.currentTime = (prog.value / 100) * v.duration;
+    v.ontimeupdate = () => {
+      $('#vp-time', bar).textContent = fmt(v.currentTime) + ' / ' + fmt(v.duration);
+      prog.value = (v.currentTime / v.duration) * 100;
+    };
+    $('#vp-rate', bar).onclick  = () => showSpeedMenu(bar);
+    $('#vp-scale', bar).onclick = () => showSizeMenu(bar);
+    $('#vp-exit', bar).onclick  = exitSmartFullscreen;
+  }
 
-        controlPanel.innerHTML = `
-            <div style="color: white; margin-bottom: 12px; font-size: 14px; font-weight: bold;">播放设置</div>
-            <button id="fullscreenBtn" style="
-                width: 100%;
-                padding: 10px;
-                margin-bottom: 8px;
-                background: #2196F3;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                cursor: pointer;
-            ">全屏播放</button>
-            <button id="speedBtn" style="
-                width: 100%;
-                padding: 10px;
-                margin-bottom: 8px;
-                background: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                cursor: pointer;
-            ">倍速选择</button>
-            <button id="aspectBtn" style="
-                width: 100%;
-                padding: 10px;
-                background: #FF9800;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                cursor: pointer;
-            ">画面尺寸</button>
-        `;
+  /* ========== 倍速 & 尺寸菜单 ========== */
+  const rates = [0.5, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 3];
+  const sizes = {填充:'cover', 拉伸:'fill', 适应:'contain', 原始:'none'};
 
-        document.body.appendChild(controlPanel);
+  function showSpeedMenu(anchor) {
+    const m = createMenu(rates.map(r => r + 'x'), t => {
+      currVid.playbackRate = parseFloat(t);
+      updateRateDisplay(parseFloat(t));
+    });
+    placeMenu(m, anchor || panel);
+  }
+  function showSizeMenu(anchor) {
+    const m = createMenu(Object.keys(sizes), t => {
+      currVid.style.objectFit = sizes[t];
+      updateSizeDisplay(t);
+    });
+    placeMenu(m, anchor || panel);
+  }
+  function updateRateDisplay(r) {
+    const btn = $('#vp-rate') || $('#vp-rate', fsWrap);
+    if (btn) btn.textContent = r + 'x';
+  }
+  function updateSizeDisplay(s) {
+    const btn = $('#vp-scale') || $('#vp-scale', fsWrap);
+    if (btn) btn.textContent = s;
+  }
 
-        // 绑定事件
-        document.getElementById('fullscreenBtn').addEventListener('click', toggleFullscreen);
-        document.getElementById('speedBtn').addEventListener('click', showSpeedMenu);
-        document.getElementById('aspectBtn').addEventListener('click', showAspectMenu);
-    }
+  /* ========== 通用菜单 ========== */
+  function createMenu(items, cb) {
+    const old = $('.vp-menu');
+    if (old) old.remove();
+    const box = document.createElement('div');
+    box.className = 'vp-menu';
+    Object.assign(box.style, {
+      position: 'fixed', background: 'rgba(0,0,0,.9)', borderRadius: '8px',
+      padding: '6px 0', zIndex: 10002, minWidth: '120px'
+    });
+    items.forEach(it => {
+      const row = document.createElement('div');
+      row.textContent = it;
+      Object.assign(row.style, {padding: '10px 14px', color: '#fff', fontSize: '14px'});
+      row.onclick = () => { cb(it); box.remove(); };
+      box.appendChild(row);
+    });
+    document.body.appendChild(box);
+    return box;
+  }
+  function placeMenu(menu, anchor) {
+    const rect = anchor.getBoundingClientRect();
+    menu.style.bottom = (innerHeight - rect.top + 6) + 'px';
+    menu.style.left = Math.max(10, rect.left) + 'px';
+  }
 
-    // 切换控制面板显示
-    function toggleControlPanel() {
-        if (!controlPanel) createControlPanel();
-        controlPanel.style.display = controlPanel.style.display === 'none' ? 'block' : 'none';
-    }
+  /* ========== 检测视频 ========== */
+  function scanVideo() {
+    document.querySelectorAll('video').forEach(v => {
+      if (v.dataset.vpHandled) return;
+      v.dataset.vpHandled = '1';
+      v.onplay = () => {
+        currVid = v;
+        ensureClover().style.display = 'flex';
+      };
+      v.onpause = () => { /* 可选：隐藏按钮 */ };
+    });
+  }
 
-    // 全屏功能
-    function toggleFullscreen() {
-        if (!currentVideo) return;
+  /* ========== 初始化 ========== */
+  const fmt = t => `${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,0)}`;
+  const mo = new MutationObserver(scanVideo);
+  mo.observe(document, {childList: true, subtree: true});
+  scanVideo();
 
-        if (!isFullscreen) {
-            originalContainer = currentVideo.parentElement;
-            
-            // 创建全屏容器
-            const fullscreenContainer = document.createElement('div');
-            fullscreenContainer.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100vw;
-                height: 100vh;
-                background: black;
-                z-index: 999999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            `;
-
-            // 移动视频到全屏容器
-            fullscreenContainer.appendChild(currentVideo);
-            document.body.appendChild(fullscreenContainer);
-
-            // 设置视频样式
-            currentVideo.style.width = '100%';
-            currentVideo.style.height = '100%';
-            currentVideo.style.objectFit = 'contain';
-
-            // 创建全屏控制栏
-            createFullscreenControls(fullscreenContainer);
-
-            isFullscreen = true;
-        } else {
-            exitFullscreen();
-        }
-    }
-
-    // 退出全屏
-    function exitFullscreen() {
-        if (!isFullscreen || !originalContainer) return;
-
-        // 恢复视频到原始位置
-        originalContainer.appendChild(currentVideo);
-        currentVideo.style.cssText = '';
-        
-        // 移除全屏容器
-        const fullscreenContainer = document.querySelector('.fullscreen-container');
-        if (fullscreenContainer) {
-            fullscreenContainer.remove();
-        }
-
-        isFullscreen = false;
-    }
-
-    // 创建全屏控制栏
-    function createFullscreenControls(container) {
-        const controls = document.createElement('div');
-        controls.className = 'fullscreen-controls';
-        controls.style.cssText = `
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.8);
-            padding: 12px 20px;
-            border-radius: 25px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            z-index: 1000000;
-        `;
-
-        controls.innerHTML = `
-            <div style="color: white; font-size: 12px;">
-                <span id="currentTime">0:00</span> / <span id="duration">0:00</span>
-            </div>
-            <input type="range" id="progressBar" style="width: 150px;" min="0" max="100" value="0">
-            <button id="speedDisplay" style="
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 12px;
-                cursor: pointer;
-            ">1.0x</button>
-            <button id="aspectDisplay" style="
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 12px;
-                cursor: pointer;
-            ">原始</button>
-            <button id="exitFullscreen" style="
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 12px;
-                cursor: pointer;
-            ">退出</button>
-        `;
-
-        container.appendChild(controls);
-        container.classList.add('fullscreen-container');
-
-        // 绑定事件
-        setupFullscreenControls(controls);
-    }
-
-    // 设置全屏控制栏事件
-    function setupFullscreenControls(controls) {
-        const progressBar = controls.querySelector('#progressBar');
-        const speedDisplay = controls.querySelector('#speedDisplay');
-        const aspectDisplay = controls.querySelector('#aspectDisplay');
-        const exitBtn = controls.querySelector('#exitFullscreen');
-
-        // 进度条
-        progressBar.addEventListener('input', (e) => {
-            if (currentVideo) {
-                currentVideo.currentTime = (e.target.value / 100) * currentVideo.duration;
-            }
-        });
-
-        // 更新进度
-        const updateProgress = () => {
-            if (currentVideo && currentVideo.duration) {
-                progressBar.value = (currentVideo.currentTime / currentVideo.duration) * 100;
-                controls.querySelector('#currentTime').textContent = formatTime(currentVideo.currentTime);
-                controls.querySelector('#duration').textContent = formatTime(currentVideo.duration);
-            }
-        };
-
-        currentVideo.addEventListener('timeupdate', updateProgress);
-
-        // 倍速显示
-        speedDisplay.addEventListener('click', () => {
-            showSpeedMenuAtElement(speedDisplay);
-        });
-
-        // 画面比例显示
-        aspectDisplay.addEventListener('click', () => {
-            showAspectMenuAtElement(aspectDisplay);
-        });
-
-        // 退出全屏
-        exitBtn.addEventListener('click', exitFullscreen);
-    }
-
-    // 格式化时间
-    function formatTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    // 显示倍速菜单
-    function showSpeedMenu() {
-        showSpeedMenuAtElement(controlPanel);
-    }
-
-    function showSpeedMenuAtElement(element) {
-        const menu = createMenu(playbackRates.map(rate => `${rate}x`), (selected) => {
-            const speed = parseFloat(selected.replace('x', ''));
-            if (currentVideo) {
-                currentVideo.playbackRate = speed;
-                updateSpeedDisplay(speed);
-            }
-        });
-        
-        positionMenu(menu, element);
-    }
-
-    // 显示画面比例菜单
-    function showAspectMenu() {
-        showAspectMenuAtElement(controlPanel);
-    }
-
-    function showAspectMenuAtElement(element) {
-        const menu = createMenu(Object.keys(aspectRatios), (selected) => {
-            if (currentVideo) {
-                setVideoAspect(aspectRatios[selected]);
-                updateAspectDisplay(selected);
-            }
-        });
-        
-        positionMenu(menu, element);
-    }
-
-    // 创建菜单
-    function createMenu(items, callback) {
-        const existingMenu = document.querySelector('.floating-menu');
-        if (existingMenu) existingMenu.remove();
-
-        const menu = document.createElement('div');
-        menu.className = 'floating-menu';
-        menu.style.cssText = `
-            position: fixed;
-            background: rgba(0, 0, 0, 0.9);
-            border-radius: 8px;
-            padding: 8px 0;
-            z-index: 10002;
-            min-width: 120px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-        `;
-
-        items.forEach(item => {
-            const menuItem = document.createElement('div');
-            menuItem.textContent = item;
-            menuItem.style.cssText = `
-                padding: 12px 16px;
-                color: white;
-                cursor: pointer;
-                font-size: 14px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            `;
-            menuItem.addEventListener('click', () => {
-                callback(item);
-                menu.remove();
-            });
-            menu.appendChild(menuItem);
-        });
-
-        document.body.appendChild(menu);
-        return menu;
-    }
-
-    // 定位菜单
-    function positionMenu(menu, element) {
-        const rect = element.getBoundingClientRect();
-        menu.style.bottom = (window.innerHeight - rect.top + 10) + 'px';
-        menu.style.left = rect.left + 'px';
-    }
-
-    // 更新倍速显示
-    function updateSpeedDisplay(speed) {
-        const speedDisplay = document.querySelector('#speedDisplay');
-        if (speedDisplay) speedDisplay.textContent = speed + 'x';
-    }
-
-    // 更新画面比例显示
-    function updateAspectDisplay(ratio) {
-        const aspectDisplay = document.querySelector('#aspectDisplay');
-        if (aspectDisplay) aspectDisplay.textContent = ratio;
-    }
-
-    // 设置视频画面比例
-    function setVideoAspect(mode) {
-        if (!currentVideo) return;
-
-        switch(mode) {
-            case 'fill':
-                currentVideo.style.objectFit = 'cover';
-                break;
-            case 'stretch':
-                currentVideo.style.objectFit = 'fill';
-                break;
-            case 'contain':
-                currentVideo.style.objectFit = 'contain';
-                break;
-            case 'original':
-                currentVideo.style.objectFit = 'none';
-                break;
-        }
-    }
-
-    // 检测视频元素
-    function detectVideo() {
-        const videos = document.querySelectorAll('video');
-        
-        videos.forEach(video => {
-            // 检查视频是否正在播放
-            const checkPlaying = () => {
-                if (video.readyState >= 2 && !floatingButton) {
-                    currentVideo = video;
-                    createFloatingButton();
-                }
-            };
-
-            video.addEventListener('play', checkPlaying);
-            video.addEventListener('loadeddata', checkPlaying);
-        });
-    }
-
-    // 初始化
-    function init() {
-        // 立即检测一次
-        detectVideo();
-
-        // 监听DOM变化，检测新视频
-        const observer = new MutationObserver(() => {
-            detectVideo();
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-
-        // 点击其他地方关闭控制面板
-        document.addEventListener('click', (e) => {
-            if (controlPanel && 
-                !controlPanel.contains(e.target) && 
-                !floatingButton.contains(e.target)) {
-                controlPanel.style.display = 'none';
-            }
-        });
-
-        // 点击其他地方关闭菜单
-        document.addEventListener('click', (e) => {
-            const menu = document.querySelector('.floating-menu');
-            if (menu && !menu.contains(e.target)) {
-                menu.remove();
-            }
-        });
-    }
-
-    // 启动脚本
-    init();
+  /* 点击空白关面板 */
+  addEventListener('click', e => {
+    if (panel && !panel.contains(e.target) && !cloverBtn.contains(e.target))
+      panel.style.display = 'none';
+    const menu = $('.vp-menu');
+    if (menu && !menu.contains(e.target)) menu.remove();
+  });
 })();
