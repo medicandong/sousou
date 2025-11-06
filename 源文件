@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         网页视频播放助手
+// @name         网页视频播放助手 - 调试版
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  手机浏览器视频播放助手，提供悬浮按钮、全屏模式、倍速播放、画面尺寸调整等功能
+// @description  手机浏览器视频播放助手 - 调试版本，包含详细日志
 // @author       Video Assistant
 // @match        *://*/*
 // @grant        none
@@ -30,12 +30,108 @@
     let controlPanel = null;
     let fullscreenControls = null;
 
+    // 调试日志
+    function debugLog(message, data = null) {
+        console.log(`[视频助手] ${message}`, data || '');
+    }
+
+    // 显示调试信息
+    function showDebugInfo() {
+        const debugDiv = document.createElement('div');
+        debugDiv.style.cssText = `
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 99999;
+            max-width: 300px;
+        `;
+        debugDiv.innerHTML = `
+            <div>视频助手调试信息</div>
+            <div>当前视频: ${currentVideo ? '已找到' : '未找到'}</div>
+            <div>悬浮按钮: ${floatingButton ? '已创建' : '未创建'}</div>
+            <div>全屏状态: ${isFullscreen ? '是' : '否'}</div>
+        `;
+        document.body.appendChild(debugDiv);
+
+        setTimeout(() => {
+            if (document.body.contains(debugDiv)) {
+                document.body.removeChild(debugDiv);
+            }
+        }, 5000);
+    }
+
     // 初始化
     function init() {
-        // 监听页面变化
-        observeVideoElements();
+        debugLog('脚本初始化开始');
+
         // 添加样式
         addStyles();
+
+        // 显示初始化信息
+        showDebugInfo();
+
+        // 监听页面变化
+        observeVideoElements();
+
+        // 定期检查视频元素
+        setInterval(checkForVideos, 1000);
+
+        // 添加手动触发按钮（用于调试）
+        addManualTrigger();
+
+        debugLog('脚本初始化完成');
+    }
+
+    // 添加手动触发按钮
+    function addManualTrigger() {
+        const triggerBtn = document.createElement('button');
+        triggerBtn.textContent = '手动显示悬浮按钮';
+        triggerBtn.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 99999;
+            font-size: 12px;
+        `;
+        triggerBtn.addEventListener('click', () => {
+            const videos = document.querySelectorAll('video');
+            debugLog('手动触发，找到视频数量:', videos.length);
+            if (videos.length > 0) {
+                currentVideo = videos[0];
+                showFloatingButton();
+                showDebugInfo();
+            }
+        });
+        document.body.appendChild(triggerBtn);
+    }
+
+    // 定期检查视频元素
+    function checkForVideos() {
+        const videos = document.querySelectorAll('video');
+        debugLog('定期检查，视频数量:', videos.length);
+
+        videos.forEach((video, index) => {
+            if (!video.dataset.videoAssistantSetup) {
+                debugLog(`设置新视频监听 #${index}`, {
+                    paused: video.paused,
+                    ended: video.ended,
+                    currentTime: video.currentTime,
+                    duration: video.duration
+                });
+                setupVideo(video);
+            }
+        });
     }
 
     // 添加样式
@@ -48,7 +144,7 @@
                 right: 20px;
                 width: 44px;
                 height: 44px;
-                background: rgba(0, 0, 0, 0.7);
+                background: rgba(255, 0, 0, 0.8); /* 红色便于调试 */
                 border-radius: 22px;
                 display: flex;
                 align-items: center;
@@ -57,20 +153,13 @@
                 cursor: pointer;
                 transition: all 0.3s ease;
                 box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-            }
-
-            .video-assistant-floating-btn:hover {
-                background: rgba(0, 0, 0, 0.8);
-                transform: scale(1.1);
+                border: 2px solid white;
             }
 
             .video-assistant-floating-btn::before {
-                content: '';
-                width: 20px;
-                height: 20px;
-                background: white;
-                mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V9H19V19H5V3H13V9H21Z'/%3E%3C/svg%3E") center/contain no-repeat;
-                -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C13.1 2 14 2.9 14 4C14 5.1 13.1 6 12 6C10.9 6 10 5.1 10 4C10 2.9 10.9 2 12 2ZM21 9V7L15 1H5C3.89 1 3 1.89 3 3V19C3 20.1 3.89 21 5 21H19C20.1 21 21 20.1 21 19V9H19V19H5V3H13V9H21Z'/%3E%3C/svg%3E") center/contain no-repeat;
+                content: '⚙️';
+                font-size: 20px;
+                color: white;
             }
 
             .video-assistant-control-panel {
@@ -84,6 +173,7 @@
                 min-width: 150px;
                 backdrop-filter: blur(10px);
                 box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+                border: 1px solid #007bff;
             }
 
             .video-assistant-control-item {
@@ -205,19 +295,26 @@
             }
         `;
         document.head.appendChild(style);
+        debugLog('样式已添加');
     }
 
     // 监听视频元素
     function observeVideoElements() {
+        debugLog('开始监听视频元素变化');
+
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === 1) {
                         if (node.tagName === 'VIDEO') {
+                            debugLog('发现新的视频元素');
                             setupVideo(node);
                         } else {
                             const videos = node.querySelectorAll ? node.querySelectorAll('video') : [];
-                            videos.forEach(setupVideo);
+                            if (videos.length > 0) {
+                                debugLog(`在节点中发现 ${videos.length} 个视频元素`);
+                                videos.forEach(setupVideo);
+                            }
                         }
                     }
                 });
@@ -230,32 +327,84 @@
         });
 
         // 检查现有视频
-        document.querySelectorAll('video').forEach(setupVideo);
+        const existingVideos = document.querySelectorAll('video');
+        debugLog('检查现有视频数量:', existingVideos.length);
+        existingVideos.forEach(setupVideo);
     }
 
     // 设置视频监听
     function setupVideo(video) {
-        if (video.dataset.videoAssistantSetup) return;
+        if (video.dataset.videoAssistantSetup) {
+            debugLog('视频已设置过监听，跳过');
+            return;
+        }
         video.dataset.videoAssistantSetup = 'true';
 
-        video.addEventListener('play', () => {
+        debugLog('设置视频监听', {
+            src: video.src,
+            paused: video.paused,
+            ended: video.ended
+        });
+
+        const showButton = () => {
+            debugLog('显示悬浮按钮触发');
             currentVideo = video;
             showFloatingButton();
-        });
+            showDebugInfo();
+        };
 
-        video.addEventListener('pause', () => {
+        const hideButton = () => {
+            debugLog('隐藏悬浮按钮触发');
             hideFloatingButton();
             hideControlPanel();
+        };
+
+        // 监听多种播放相关事件
+        const events = ['play', 'playing', 'canplay', 'pause', 'ended', 'waiting'];
+        events.forEach(event => {
+            video.addEventListener(event, (e) => {
+                debugLog(`视频事件: ${event}`, {
+                    paused: video.paused,
+                    ended: video.ended,
+                    currentTime: video.currentTime
+                });
+            });
         });
 
-        video.addEventListener('ended', () => {
-            hideFloatingButton();
-            hideControlPanel();
+        video.addEventListener('play', showButton);
+        video.addEventListener('playing', showButton);
+        video.addEventListener('canplay', () => {
+            if (!video.paused && !video.ended) {
+                debugLog('视频已可播放且正在播放，显示按钮');
+                showButton();
+            }
+        });
+
+        video.addEventListener('pause', hideButton);
+        video.addEventListener('ended', hideButton);
+        video.addEventListener('waiting', hideButton);
+
+        // 检查是否已经有视频在播放
+        if (!video.paused && !video.ended) {
+            debugLog('视频已在播放，立即显示按钮');
+            setTimeout(() => showButton(), 100);
+        }
+
+        // 监听页面可见性变化
+        document.addEventListener('visibilitychange', () => {
+            debugLog('页面可见性变化', { hidden: document.hidden });
+            if (document.hidden) {
+                hideButton();
+            } else if (!video.paused && !video.ended) {
+                setTimeout(() => showButton(), 500);
+            }
         });
     }
 
     // 显示悬浮按钮
     function showFloatingButton() {
+        debugLog('显示悬浮按钮');
+
         if (floatingButton) {
             floatingButton.classList.remove('video-assistant-hidden');
             return;
@@ -263,18 +412,21 @@
 
         floatingButton = document.createElement('div');
         floatingButton.className = 'video-assistant-floating-btn';
-        floatingButton.innerHTML = '';
+        floatingButton.title = '视频播放助手';
 
         floatingButton.addEventListener('click', (e) => {
             e.stopPropagation();
+            debugLog('悬浮按钮被点击');
             toggleControlPanel();
         });
 
         document.body.appendChild(floatingButton);
+        debugLog('悬浮按钮已创建并显示');
     }
 
     // 隐藏悬浮按钮
     function hideFloatingButton() {
+        debugLog('隐藏悬浮按钮');
         if (floatingButton) {
             floatingButton.classList.add('video-assistant-hidden');
         }
@@ -291,6 +443,8 @@
 
     // 显示控制面板
     function showControlPanel() {
+        debugLog('显示控制面板');
+
         if (controlPanel) {
             controlPanel.classList.remove('video-assistant-hidden');
             return;
@@ -300,15 +454,18 @@
         controlPanel.className = 'video-assistant-control-panel';
 
         const fullscreenItem = createControlItem('全屏播放', () => {
+            debugLog('全屏播放被点击');
             enterFullscreen();
             hideControlPanel();
         });
 
         const speedItem = createControlItem('倍速选择', () => {
+            debugLog('倍速选择被点击');
             showSpeedSelector();
         });
 
         const sizeItem = createControlItem('画面尺寸', () => {
+            debugLog('画面尺寸被点击');
             showSizeSelector();
         });
 
@@ -335,6 +492,7 @@
 
     // 隐藏控制面板
     function hideControlPanel() {
+        debugLog('隐藏控制面板');
         if (controlPanel) {
             controlPanel.classList.add('video-assistant-hidden');
         }
@@ -342,8 +500,12 @@
 
     // 进入全屏模式
     function enterFullscreen() {
-        if (!currentVideo) return;
+        if (!currentVideo) {
+            debugLog('无法进入全屏：没有当前视频');
+            return;
+        }
 
+        debugLog('进入全屏模式');
         isFullscreen = true;
         originalVideoStyle = currentVideo.style.cssText;
 
@@ -375,6 +537,7 @@
 
         // 退出全屏事件
         const exitFullscreen = () => {
+            debugLog('退出全屏模式');
             isFullscreen = false;
             document.body.removeChild(overlay);
             if (currentVideo) {
@@ -431,6 +594,7 @@
         const speedButton = document.createElement('button');
         speedButton.className = 'video-assistant-control-button';
         speedButton.textContent = `${video.playbackRate}x`;
+
         speedButton.addEventListener('click', (e) => {
             e.stopPropagation();
             showSpeedDropdown(speedButton, video);
@@ -440,38 +604,73 @@
         const sizeButton = document.createElement('button');
         sizeButton.className = 'video-assistant-control-button';
         sizeButton.textContent = '原始';
+
         sizeButton.addEventListener('click', (e) => {
             e.stopPropagation();
             showSizeDropdown(sizeButton, video);
+        });
+
+        // 退出按钮（手机端专用）
+        const exitButton = document.createElement('button');
+        exitButton.className = 'video-assistant-control-button';
+        exitButton.textContent = '退出';
+        exitButton.style.background = 'rgba(255, 68, 68, 0.8)';
+
+        exitButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            isFullscreen = false;
+            document.body.removeChild(overlay);
+            if (currentVideo) {
+                currentVideo.style.cssText = originalVideoStyle;
+                currentVideo.play();
+            }
+        });
+
+        // 双击退出功能
+        let lastTap = 0;
+        overlay.addEventListener('touchend', (e) => {
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTap;
+            if (tapLength < 300 && tapLength > 0) {
+                // 双击退出
+                isFullscreen = false;
+                document.body.removeChild(overlay);
+                if (currentVideo) {
+                    currentVideo.style.cssText = originalVideoStyle;
+                    currentVideo.play();
+                }
+            }
+            lastTap = currentTime;
         });
 
         const controlGroup = document.createElement('div');
         controlGroup.className = 'video-assistant-control-group';
         controlGroup.appendChild(speedButton);
         controlGroup.appendChild(sizeButton);
+        controlGroup.appendChild(exitButton);
 
         fullscreenControls.appendChild(progressBar);
         fullscreenControls.appendChild(controlGroup);
-
         overlay.appendChild(fullscreenControls);
-    }
 
-    // 显示倍速选择器
-    function showSpeedSelector() {
-        hideControlPanel();
-        showSpeedDropdown(floatingButton, currentVideo);
+        debugLog('全屏控制栏已创建');
     }
 
     // 显示倍速下拉菜单
-    function showSpeedDropdown(anchor, video) {
-        const existingDropdown = document.querySelector('.video-assistant-speed-dropdown');
+    function showSpeedDropdown(button, video) {
+        debugLog('显示倍速下拉菜单');
+
+        const existingDropdown = document.querySelector('.video-assistant-dropdown');
         if (existingDropdown) {
             document.body.removeChild(existingDropdown);
-            return;
         }
 
         const dropdown = document.createElement('div');
-        dropdown.className = 'video-assistant-dropdown video-assistant-speed-dropdown';
+        dropdown.className = 'video-assistant-dropdown';
+
+        const rect = button.getBoundingClientRect();
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.bottom = `${window.innerHeight - rect.top}px`;
 
         CONFIG.playbackRates.forEach(rate => {
             const item = document.createElement('div');
@@ -483,17 +682,12 @@
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 video.playbackRate = rate;
-                if (anchor.classList.contains('video-assistant-control-button')) {
-                    anchor.textContent = `${rate}x`;
-                }
+                button.textContent = `${rate}x`;
                 document.body.removeChild(dropdown);
+                debugLog(`设置播放倍速: ${rate}x`);
             });
             dropdown.appendChild(item);
         });
-
-        const rect = anchor.getBoundingClientRect();
-        dropdown.style.bottom = `${window.innerHeight - rect.top + 10}px`;
-        dropdown.style.left = `${rect.left}px`;
 
         document.body.appendChild(dropdown);
 
@@ -507,22 +701,21 @@
         }, 100);
     }
 
-    // 显示尺寸选择器
-    function showSizeSelector() {
-        hideControlPanel();
-        showSizeDropdown(floatingButton, currentVideo);
-    }
-
     // 显示尺寸下拉菜单
-    function showSizeDropdown(anchor, video) {
-        const existingDropdown = document.querySelector('.video-assistant-size-dropdown');
+    function showSizeDropdown(button, video) {
+        debugLog('显示尺寸下拉菜单');
+
+        const existingDropdown = document.querySelector('.video-assistant-dropdown');
         if (existingDropdown) {
             document.body.removeChild(existingDropdown);
-            return;
         }
 
         const dropdown = document.createElement('div');
-        dropdown.className = 'video-assistant-dropdown video-assistant-size-dropdown';
+        dropdown.className = 'video-assistant-dropdown';
+
+        const rect = button.getBoundingClientRect();
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.bottom = `${window.innerHeight - rect.top}px`;
 
         CONFIG.videoSizes.forEach(size => {
             const item = document.createElement('div');
@@ -531,17 +724,12 @@
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 applyVideoSize(video, size.value);
-                if (anchor.classList.contains('video-assistant-control-button')) {
-                    anchor.textContent = size.name;
-                }
+                button.textContent = size.name;
                 document.body.removeChild(dropdown);
+                debugLog(`设置画面尺寸: ${size.name}`);
             });
             dropdown.appendChild(item);
         });
-
-        const rect = anchor.getBoundingClientRect();
-        dropdown.style.bottom = `${window.innerHeight - rect.top + 10}px`;
-        dropdown.style.left = `${rect.left}px`;
 
         document.body.appendChild(dropdown);
 
@@ -557,21 +745,19 @@
 
     // 应用视频尺寸
     function applyVideoSize(video, size) {
+        debugLog(`应用视频尺寸: ${size}`);
+
         switch (size) {
             case 'fill':
-                video.style.objectFit = 'cover';
-                video.style.width = '100%';
-                video.style.height = '100%';
+                video.style.objectFit = 'fill';
                 break;
             case 'stretch':
-                video.style.objectFit = 'fill';
+                video.style.objectFit = 'none';
                 video.style.width = '100%';
                 video.style.height = '100%';
                 break;
             case 'fit':
                 video.style.objectFit = 'contain';
-                video.style.width = '100%';
-                video.style.height = '100%';
                 break;
             case 'original':
                 video.style.objectFit = 'none';
@@ -581,10 +767,102 @@
         }
     }
 
-    // 页面加载完成后初始化
+    // 显示倍速选择器
+    function showSpeedSelector() {
+        debugLog('显示倍速选择器');
+
+        const existingDropdown = document.querySelector('.video-assistant-dropdown');
+        if (existingDropdown) {
+            document.body.removeChild(existingDropdown);
+        }
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'video-assistant-dropdown';
+
+        const rect = controlPanel.getBoundingClientRect();
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+
+        CONFIG.playbackRates.forEach(rate => {
+            const item = document.createElement('div');
+            item.className = 'video-assistant-dropdown-item';
+            item.textContent = `${rate}x`;
+            if (currentVideo && currentVideo.playbackRate === rate) {
+                item.style.background = 'rgba(255, 255, 255, 0.2)';
+            }
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentVideo) {
+                    currentVideo.playbackRate = rate;
+                    debugLog(`设置播放倍速: ${rate}x`);
+                }
+                document.body.removeChild(dropdown);
+                hideControlPanel();
+            });
+            dropdown.appendChild(item);
+        });
+
+        document.body.appendChild(dropdown);
+
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', () => {
+                if (document.body.contains(dropdown)) {
+                    document.body.removeChild(dropdown);
+                }
+            }, { once: true });
+        }, 100);
+    }
+
+    // 显示尺寸选择器
+    function showSizeSelector() {
+        debugLog('显示尺寸选择器');
+
+        const existingDropdown = document.querySelector('.video-assistant-dropdown');
+        if (existingDropdown) {
+            document.body.removeChild(existingDropdown);
+        }
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'video-assistant-dropdown';
+
+        const rect = controlPanel.getBoundingClientRect();
+        dropdown.style.left = `${rect.left}px`;
+        dropdown.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+
+        CONFIG.videoSizes.forEach(size => {
+            const item = document.createElement('div');
+            item.className = 'video-assistant-dropdown-item';
+            item.textContent = size.name;
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (currentVideo) {
+                    applyVideoSize(currentVideo, size.value);
+                    debugLog(`设置画面尺寸: ${size.name}`);
+                }
+                document.body.removeChild(dropdown);
+                hideControlPanel();
+            });
+            dropdown.appendChild(item);
+        });
+
+        document.body.appendChild(dropdown);
+
+        // 点击外部关闭
+        setTimeout(() => {
+            document.addEventListener('click', () => {
+                if (document.body.contains(dropdown)) {
+                    document.body.removeChild(dropdown);
+                }
+            }, { once: true });
+        }, 100);
+    }
+
+    // 启动脚本
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
         init();
     }
+
 })();
