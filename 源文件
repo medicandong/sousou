@@ -211,10 +211,42 @@
         return button;
     }
 
-    // 获取当前页面中的视频元素（增强兼容性）
+    // 获取当前页面中的视频元素（增强移动端兼容性）
     function getVideoElements() {
         let videos = document.querySelectorAll('video');
         console.log(`找到 ${videos.length} 个标准视频元素`);
+        
+        // 移动端增强检测：检查更多可能的视频选择器
+        if (videos.length === 0) {
+            console.log('尝试移动端增强视频检测...');
+            
+            // 移动端常见的视频选择器
+            const mobileSelectors = [
+                'video',
+                'video[src]',
+                'video[data-src]',
+                'video[poster]',
+                '.video',
+                '.video-player video',
+                '.media-player video',
+                '.player video',
+                'video.video-js',
+                'video.html5-video-player',
+                'video.video-stream'
+            ];
+            
+            mobileSelectors.forEach(selector => {
+                try {
+                    const foundVideos = document.querySelectorAll(selector);
+                    if (foundVideos.length > 0) {
+                        console.log(`通过选择器 "${selector}" 找到 ${foundVideos.length} 个视频元素`);
+                        videos = Array.from(videos).concat(Array.from(foundVideos));
+                    }
+                } catch (e) {
+                    console.log(`选择器 "${selector}" 查询失败:`, e);
+                }
+            });
+        }
         
         // 如果当前页面没有视频，检查iframe中的视频
         if (videos.length === 0) {
@@ -251,11 +283,20 @@
             }
         }
         
-        // 过滤掉不可用的视频元素
+        // 过滤掉不可用的视频元素（移动端放宽条件）
         videos = Array.from(videos).filter(video => {
-            const isValid = video && video.tagName === 'VIDEO' && video.readyState > 0;
+            // 移动端放宽条件：只要存在video元素就认为是有效的
+            const isValid = video && video.tagName === 'VIDEO';
             if (!isValid) {
                 console.log('过滤掉无效视频元素:', video);
+            } else {
+                console.log('有效视频元素:', {
+                    tagName: video.tagName,
+                    readyState: video.readyState,
+                    src: video.src,
+                    currentSrc: video.currentSrc,
+                    duration: video.duration
+                });
             }
             return isValid;
         });
@@ -514,10 +555,19 @@
         console.log('事件监听器初始化完成');
     }
 
-    // 检测页面中的视频元素（定期检查，处理动态加载的视频）
+    // 检测页面中的视频元素（移动端增强，定期检查，处理动态加载的视频）
     function detectVideos() {
         const videos = getVideoElements();
         console.log(`检测到 ${videos.length} 个视频元素`);
+        
+        // 移动端调试信息
+        console.log('移动端调试信息:', {
+            userAgent: navigator.userAgent,
+            isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+            touchSupport: 'ontouchstart' in window,
+            screenSize: `${window.innerWidth}x${window.innerHeight}`,
+            documentReadyState: document.readyState
+        });
         
         if (videos.length > 0) {
             // 如果有视频元素，确保悬浮按钮可用
@@ -527,9 +577,12 @@
                 const anyPlaying = Array.from(videos).some(video => !video.paused);
                 console.log(`有视频正在播放: ${anyPlaying}`);
                 
-                if (anyPlaying) {
+                // 移动端策略：只要有视频就显示按钮，无论是否播放
+                const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                
+                if (anyPlaying || isMobile) {
                     showFloatingButton();
-                    console.log('显示悬浮按钮');
+                    console.log('显示悬浮按钮（移动端策略）');
                 } else {
                     // 如果有视频但未播放，也显示按钮（方便用户操作）
                     const hasVideo = videos.length > 0;
