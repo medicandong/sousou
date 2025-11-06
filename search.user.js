@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         手机端快捷搜索助手（4选3固定）
+// @name         手机端快捷搜索助手（Yandex闪退修复）
 // @namespace    https://github.com/yourname
-// @version      1.2.0
+// @version      1.3.0
 // @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
@@ -117,15 +117,18 @@
   #qeSettings button{margin-top:8px;margin-right:6px;}
   `;
 
-  /* ========== 4. 构建快捷条 ========== */
+  /* ========== 4. 构建快捷条（可重复调用） ========== */
   function buildBar() {
     const kw = getQuery();
     if (!kw) return;
     const current = detectCurrentEngine();
-    /* 关键：默认 4 个全部勾选，所以永远出现另外 3 个 */
     const selectedKeys = GM_getValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
     const customEngines = GM_getValue('customEngines', []);
     const all = [...ENGINE_DB, ...customEngines];
+
+    /* 如果旧条已存在，先删掉再插新条，避免重复 */
+    const oldBar = $('#quickEngineBar');
+    if (oldBar) oldBar.remove();
 
     const bar = document.createElement('div');
     bar.id = 'quickEngineBar';
@@ -140,8 +143,7 @@
          bar.appendChild(a);
        });
 
-    /* 万能锚点：Yandex / DuckDuckGo 也能插进去 */
-    let anchor =
+    const anchor =
       $('form[role="search"], form#searchform, form[action*="/search"]') ||
       $('form[action*="google"], form[action*="yandex"], form[action*="duckduckgo"], form[action*="baidu"]') ||
       (() => {
@@ -155,7 +157,19 @@
     }
   }
 
-  /* ========== 5. 可视化设置（无百度） ========== */
+  /* ========== 5. 监听 Yandex 等动态页面 ========== */
+  function keepBarAlive() {
+    /* 首次插入 */
+    buildBar();
+    /* 监听搜索框区域，一旦被清空就重新插入 */
+    const targetNode = document.querySelector('form') || document.body;
+    const observer = new MutationObserver(() => {
+      if (!document.contains($('#quickEngineBar'))) buildBar();
+    });
+    observer.observe(targetNode, { childList: true, subtree: true });
+  }
+
+  /* ========== 6. 可视化设置（无百度） ========== */
   function openSettings() {
     let panel = $('#qeSettings');
     if (panel) { panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; return; }
@@ -205,13 +219,13 @@
     };
   }
 
-  /* ========== 6. 初始化 ========== */
+  /* ========== 7. 初始化 ========== */
   function init() {
     if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
-    buildBar();
+    keepBarAlive();          // 改用 keepBarAlive，而不再是 buildBar
     GM_registerMenuCommand('⚙️ 搜索引擎设置', openSettings);
   }
 
