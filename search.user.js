@@ -1,15 +1,15 @@
 // ==UserScript==
-// @name         手机端快捷搜索助手（Yandex闪退修复）
+// @name         手机端快捷搜索助手（Yandex永远显示版）
 // @namespace    https://github.com/yourname
-// @version      1.3.0
+// @version      1.4.0
 // @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
-// @run-at       document-end
-// ==/UserScript==
+// @run-at       document-start
+// ==UserScript==
 
 (function () {
   'use strict';
@@ -69,7 +69,7 @@
   function getQuery() {
     const q = new URLSearchParams(location.search).get('q') ||
               new URLSearchParams(location.search).get('wd') ||
-              new URLSearchParams(location.search).get('text') || '';   // Yandex 用 text
+              new URLSearchParams(location.search).get('text') || '';
     return decodeURIComponent(q);
   }
 
@@ -126,7 +126,6 @@
     const customEngines = GM_getValue('customEngines', []);
     const all = [...ENGINE_DB, ...customEngines];
 
-    /* 如果旧条已存在，先删掉再插新条，避免重复 */
     const oldBar = $('#quickEngineBar');
     if (oldBar) oldBar.remove();
 
@@ -144,29 +143,36 @@
        });
 
     const anchor =
-      $('form[role="search"], form#searchform, form[action*="/search"]') ||
-      $('form[action*="google"], form[action*="yandex"], form[action*="duckduckgo"], form[action*="baidu"]') ||
-      (() => {
-        const inp = $('input[name="q"], input[name="wd"], input[name="text"]');
-        return inp ? inp.closest('form') || inp.parentElement : null;
-      })();
+      $('input[name="q"], input[name="wd"], input[name="text"]')?.closest('form') ||
+      $('form[role="search"], form[action*="/search"]') ||
+      $('#search-form') ||
+      document.body;
     if (anchor) {
       if (anchor.nextSibling) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
       else anchor.parentNode.appendChild(bar);
       highlightKeyword(kw);
+      return true;   // 插入成功
     }
+    return false;      // 插入失败
   }
 
-  /* ========== 5. 监听 Yandex 等动态页面 ========== */
+  /* ========== 5. 永远保持按钮存在 ========== */
   function keepBarAlive() {
-    /* 首次插入 */
-    buildBar();
-    /* 监听搜索框区域，一旦被清空就重新插入 */
-    const targetNode = document.querySelector('form') || document.body;
-    const observer = new MutationObserver(() => {
-      if (!document.contains($('#quickEngineBar'))) buildBar();
-    });
-    observer.observe(targetNode, { childList: true, subtree: true });
+    /* 先等框架渲染完（Yandex 大约 1s） */
+    setTimeout(() => {
+      let retry = 0;
+      const tryInsert = () => {
+        if (buildBar() || retry++ > 20) return;   // 成功或超时停止
+        setTimeout(tryInsert, 500);
+      };
+      tryInsert();
+
+      /* 如果框架后续再清空，立即重插 */
+      const observer = new MutationObserver(() => {
+        if (!document.contains($('#quickEngineBar'))) buildBar();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }, 1000);   // 1 秒后才开始
   }
 
   /* ========== 6. 可视化设置（无百度） ========== */
@@ -225,7 +231,7 @@
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
-    keepBarAlive();          // 改用 keepBarAlive，而不再是 buildBar
+    keepBarAlive();          // 改用 keepBarAlive
     GM_registerMenuCommand('⚙️ 搜索引擎设置', openSettings);
   }
 
