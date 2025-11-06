@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         手机端快捷搜索助手（Yandex永远显示版）
+// @name         手机端快捷搜索助手（干净版）
 // @namespace    https://github.com/yourname
-// @version      1.4.0
+// @version      1.5.0
 // @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
@@ -14,7 +14,6 @@
 (function () {
   'use strict';
 
-  /* ========== 1. 引擎数据（无百度） ========== */
   const ENGINE_DB = [
     {
       key: 'google',
@@ -51,11 +50,9 @@
     }
   ];
 
-  /* ========== 2. 工具函数 ========== */
-  const $  = (s, el) => (el || document).querySelector(s);
+  const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => [...(el || document).querySelectorAll(s)];
 
-  /* 识别当前引擎：谷歌通配任意后缀 */
   function detectCurrentEngine() {
     const h = location.hostname;
     if (/^www\.google\./.test(h)) return 'google';
@@ -65,7 +62,6 @@
     return '';
   }
 
-  /* 取关键词 */
   function getQuery() {
     const q = new URLSearchParams(location.search).get('q') ||
               new URLSearchParams(location.search).get('wd') ||
@@ -73,7 +69,6 @@
     return decodeURIComponent(q);
   }
 
-  /* 高亮关键词 */
   function highlightKeyword(keyword) {
     if (!keyword) return;
     const reg = new RegExp(`(${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
@@ -91,33 +86,20 @@
     $$('body *').forEach(el => walk(el));
   }
 
-  /* ========== 3. 样式 ========== */
   const STYLE = `
-  #quickEngineBar{
-    position:relative;margin:8px 0 12px;display:flex;gap:10px;
-    overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;
-  }
+  #quickEngineBar{position:relative;margin:8px 0 12px;display:flex;gap:10px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;}
   #quickEngineBar::-webkit-scrollbar{height:4px;}
   #quickEngineBar::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px;}
-  .qe-btn{
-    flex:0 0 auto;display:flex;align-items:center;background:#fff;
-    border:1px solid #dfe1e5;border-radius:20px;padding:6px 10px;
-    font-size:14px;color:#202124;text-decoration:none;white-space:nowrap;
-  }
+  .qe-btn{flex:0 0 auto;display:flex;align-items:center;background:#fff;border:1px solid #dfe1e5;border-radius:20px;padding:6px 10px;font-size:14px;color:#202124;text-decoration:none;white-space:nowrap;}
   .qe-btn img{width:16px;height:16px;margin-right:6px;}
   .qe-btn:active{background:#f1f3f4;}
-  #qeSettings{
-    position:fixed;top:10px;right:10px;z-index:9999;background:#fff;
-    border:1px solid #dadce0;border-radius:8px;padding:12px;width:260px;
-    box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:14px;display:none;
-  }
+  #qeSettings{position:fixed;top:10px;right:10px;z-index:9999;background:#fff;border:1px solid #dadce0;border-radius:8px;padding:12px;width:260px;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:14px;display:none;}
   #qeSettings h4{margin:0 0 8px;font-size:16px;}
   #qeSettings label{display:block;margin-bottom:6px;}
   #qeSettings input[type=text]{width:100%;padding:4px 6px;margin-top:4px;}
   #qeSettings button{margin-top:8px;margin-right:6px;}
   `;
 
-  /* ========== 4. 构建快捷条（可重复调用） ========== */
   function buildBar() {
     const kw = getQuery();
     if (!kw) return;
@@ -151,31 +133,26 @@
       if (anchor.nextSibling) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
       else anchor.parentNode.appendChild(bar);
       highlightKeyword(kw);
-      return true;   // 插入成功
+      return true;
     }
-    return false;      // 插入失败
+    return false;
   }
 
-  /* ========== 5. 永远保持按钮存在 ========== */
   function keepBarAlive() {
-    /* 先等框架渲染完（Yandex 大约 1s） */
     setTimeout(() => {
       let retry = 0;
       const tryInsert = () => {
-        if (buildBar() || retry++ > 20) return;   // 成功或超时停止
+        if (buildBar() || retry++ > 20) return;
         setTimeout(tryInsert, 500);
       };
       tryInsert();
-
-      /* 如果框架后续再清空，立即重插 */
       const observer = new MutationObserver(() => {
         if (!document.contains($('#quickEngineBar'))) buildBar();
       });
       observer.observe(document.body, { childList: true, subtree: true });
-    }, 1000);   // 1 秒后才开始
+    }, 1000);
   }
 
-  /* ========== 6. 可视化设置（无百度） ========== */
   function openSettings() {
     let panel = $('#qeSettings');
     if (panel) { panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; return; }
@@ -225,13 +202,12 @@
     };
   }
 
-  /* ========== 7. 初始化 ========== */
   function init() {
     if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
-    keepBarAlive();          // 改用 keepBarAlive
+    keepBarAlive();
     GM_registerMenuCommand('⚙️ 搜索引擎设置', openSettings);
   }
 
