@@ -1,6 +1,1 @@
-优化
-1. YouTube无法生效
-2. 倍速选择只能拖动右侧条，需要改为浮窗滑动可变
-3. 竖屏无法生效
-4. 窗口出现折叠问题
-5. 无法调整画面比例
+手机端搜索助手安装链接：https://raw.githubusercontent.com/medicandong/sousou/refs/heads/main/search.user.js
