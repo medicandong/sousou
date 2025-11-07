@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         小说阅读助手增强版
+// @name         小说阅读助手VIA优化版
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  基于VIA浏览器阅读模式理念优化的通用小说阅读助手
-// @author       Novel Reader Enhanced
+// @version      3.0
+// @description  基于VIA浏览器阅读模式理念深度优化的通用小说阅读助手
+// @author       Novel Reader VIA Optimized
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -15,791 +15,986 @@
 (function() {
     'use strict';
 
-    // 增强配置
+    // VIA浏览器风格配置
     const CONFIG = {
         autoScrollSpeed: [0.5, 1, 1.5, 2, 2.5, 3],
         fontSize: [12, 14, 16, 18, 20, 22, 24, 26, 28],
         lineHeight: [1.2, 1.4, 1.6, 1.8, 2.0, 2.2],
-        theme: ['light', 'dark', 'sepia', 'green'],
+        theme: ['light', 'dark', 'sepia', 'green', 'blue'],
         margin: [0, 10, 20, 30, 40, 50],
-        contentWidth: [600, 700, 800, 900, 1000, 1200]
+        contentWidth: [600, 700, 800, 900, 1000, 1200],
+        // VIA浏览器特色功能
+        enableSmartDetection: true,
+        enableAutoChapter: true,
+        enableContentExtraction: true,
+        enableSmoothNavigation: true
     };
 
-    // 全局状态
-    let floatingButton = null;
-    let controlPanel = null;
-    let isReadingMode = false;
-    let autoScrollInterval = null;
-    let currentScrollSpeed = 1;
-    let isTraditionalToSimplified = false;
-    let originalBodyContent = null;
-    let enhancedContent = null;
-    let pageState = {
-        currentUrl: window.location.href,
-        scrollPosition: 0,
-        readingModeActive: false
+    // 全局状态管理
+    let state = {
+        floatingButton: null,
+        controlPanel: null,
+        isReadingMode: false,
+        autoScrollInterval: null,
+        currentScrollSpeed: 1,
+        isTraditionalToSimplified: false,
+        originalBodyContent: null,
+        enhancedContent: null,
+        pageState: {
+            currentUrl: window.location.href,
+            scrollPosition: 0,
+            readingModeActive: false,
+            chapterTitle: ''
+        },
+        // VIA浏览器风格状态
+        viaMode: {
+            smartDetectionEnabled: true,
+            contentExtractionEnabled: true,
+            smoothNavigationEnabled: true
+        }
     };
 
-    // 智能页面检测器
-    const PageDetector = {
-        // 小说网站特征库
+    // VIA浏览器风格智能检测器
+    const VIAPageDetector = {
+        // 扩展的小说网站特征库（基于VIA浏览器数据）
         novelSites: [
             // 中文小说网站
             'qidian.com', 'zongheng.com', '17k.com', 'hongxiu.com',
             'xxsy.net', 'jinjiang.com', 'booktxt.net', 'biquge.com',
             'x23us.com', 'dingdiann.com', 'shuquge.com', 'biquku.com',
+            '69shu.com', 'bxwx.org', 'piaotian.com', 'wenku8.net',
+            'uukanshu.com', 'shubaow.com', 'daocaorenshuwu.com',
+            'novelbuddy.com', 'novelbin.com', 'novelhall.com',
             // 英文小说网站
-            'wattpad.com', 'royalroad.com', 'webnovel.com', 'novelupdates.com'
+            'wattpad.com', 'royalroad.com', 'webnovel.com', 'novelupdates.com',
+            'scribblehub.com', 'lightnovelpub.com', 'ranobes.net',
+            // 轻小说网站
+            'linovelib.com', 'wenxue.iqiyi.com', 'book.qidian.com'
         ],
 
-        // 小说内容特征
+        // VIA浏览器风格内容模式识别
         contentPatterns: [
             /第[零一二三四五六七八九十百千]+章/,
             /chapter\s+\d+/i,
             /[上下]?一?[章节回]/,
-            /正文开始|正文内容|小说内容/,
-            /novel|chapter|volume/i
+            /正文开始|正文内容|小说内容|本章内容/,
+            /novel|chapter|volume|story/i,
+            /[\u4e00-\u9fa5]{100,}/, // 连续中文文本
+            /[。！？]{3,}/ // 多个中文标点
         ],
 
-        // 章节导航特征
+        // 章节导航模式
         navPatterns: [
             /上一[章节回]|下一[章节回]/,
-            /prev|next/i,
+            /prev|next|previous/i,
             /chapter.*nav|nav.*chapter/i,
-            /目录|章节列表|table of contents/i
+            /目录|章节列表|table of contents|toc/i,
+            /第.*章.*第.*章/ // 章节链接模式
         ],
 
-        // 检测是否为小说页面
+        // VIA浏览器风格智能检测（降低阈值，提高兼容性）
         isNovelPage() {
             const url = window.location.href.toLowerCase();
             const domain = window.location.hostname.toLowerCase();
             
-            // 1. 检查域名是否匹配已知小说网站
+            // 1. 宽松的域名匹配
             if (this.novelSites.some(site => domain.includes(site))) {
+                console.log('VIA检测: 匹配已知小说网站');
                 return true;
             }
 
-            // 2. 检查URL路径特征
+            // 2. 宽松的URL路径匹配
             const path = window.location.pathname.toLowerCase();
-            if (path.includes('/chapter/') || path.includes('/read/') || 
-                path.includes('/novel/') || path.includes('/book/')) {
+            const urlPatterns = [
+                '/chapter/', '/read/', '/novel/', '/book/', '/txt/', 
+                '/article/', '/content/', '/text/', '/小说/', '/章节/',
+                '/ch/', '/chap/', '/volume/', '/story/',
+                /\d+\/\d+\.html?/, // 类似 123/456.html
+                /\/\d+\/\d+\//,   // 类似 /123/456/
+                /\/\d+\.html?$/,  // 类似 /123.html
+                /\/\d+\//         // 类似 /123/
+            ];
+            
+            if (urlPatterns.some(pattern => 
+                typeof pattern === 'string' ? path.includes(pattern) : pattern.test(path)
+            )) {
+                console.log('VIA检测: 匹配URL模式');
                 return true;
             }
 
-            // 3. 检查页面内容特征
+            // 3. 内容特征检测（降低阈值）
             const textContent = document.body.textContent || '';
             const hasNovelKeywords = this.contentPatterns.some(pattern => 
                 pattern.test(textContent)
             );
 
-            // 4. 检查章节导航
+            // 4. 章节导航检测
             const hasChapterNav = this.navPatterns.some(pattern => 
                 pattern.test(textContent)
             );
 
-            // 5. 检查是否有章节内容区域
+            // 5. 内容区域检测
             const hasContentArea = this.findContentArea() !== null;
 
-            return hasNovelKeywords || hasChapterNav || hasContentArea;
+            // 6. 页面结构检测
+            const hasNovelStructure = this.hasNovelStructure();
+
+            // VIA浏览器风格：满足任一条件即可启用
+            const isNovel = hasNovelKeywords || hasChapterNav || hasContentArea || hasNovelStructure;
+            
+            if (isNovel) {
+                console.log('VIA检测结果:', {
+                    hasNovelKeywords,
+                    hasChapterNav, 
+                    hasContentArea,
+                    hasNovelStructure
+                });
+            }
+            
+            return isNovel;
         },
 
-        // 智能查找内容区域
+        // VIA浏览器风格页面结构分析
+        hasNovelStructure() {
+            // 检查章节标题
+            const titleSelectors = [
+                'h1', 'h2', 'h3', 'h4',
+                '.chapter-title', '.title', '.novel-title',
+                '.book-title', '.content-title', '.entry-title'
+            ];
+            
+            const hasChapterTitle = titleSelectors.some(selector => {
+                const elements = document.querySelectorAll(selector);
+                return Array.from(elements).some(el => {
+                    const text = el.textContent.trim();
+                    return text && (
+                        (text.includes('第') && text.includes('章')) || 
+                        text.match(/Chapter\s+\d+/i) ||
+                        (text.length > 3 && text.length < 100 && !this.isNoiseElement(el))
+                    );
+                });
+            });
+
+            // 检查文本内容量（VIA浏览器风格：更宽松）
+            const textNodes = document.querySelectorAll('p, div, article, section');
+            let textLength = 0;
+            let validParagraphs = 0;
+            
+            textNodes.forEach(node => {
+                const text = node.textContent || '';
+                if (text.length > 30 && !this.isNoiseElement(node) && 
+                    node.offsetWidth > 0 && node.offsetHeight > 0) {
+                    textLength += text.length;
+                    validParagraphs++;
+                }
+            });
+
+            // VIA浏览器风格：只要有标题和一定文本量就认为是小说页面
+            return hasChapterTitle && textLength > 200 && validParagraphs >= 2;
+        },
+
+        // VIA浏览器风格内容区域查找
         findContentArea() {
             const contentSelectors = [
-                // 中文小说网站常用选择器
+                // 中文网站
                 '.content', '.chapter-content', '.novel-content', '.read-content',
                 '.text-content', '.article-content', '.chapter-text', '.book-content',
+                '.story-content', '.main-content', '.entry-content',
                 '#content', '#chapter-content', '#novel-content', '#read-content',
-                // 英文小说网站常用选择器
+                '#text-content', '#article-content',
+                // 英文网站  
                 '.chapter', '.chapter-body', '.chapter-content', '.novel-body',
-                '.entry-content', '.post-content', '.story-content',
+                '.entry-content', '.post-content', '.story-content', '.content-body',
                 // 通用选择器
-                'article', 'main', '[role="main"]', '.main-content'
+                'article', 'main', '[role="main"]', '.main-content',
+                // VIA浏览器特色：尝试body直接内容
+                'body'
             ];
 
             for (const selector of contentSelectors) {
                 const elements = document.querySelectorAll(selector);
                 for (const element of elements) {
                     const text = element.textContent || '';
-                    if (text.length > 300 && this.isLikelyNovelContent(text)) {
+                    if (text.length > 100 && this.isLikelyNovelContent(text)) {
+                        console.log('VIA找到内容区域:', selector);
                         return element;
                     }
                 }
             }
 
-            // 回退到智能内容提取
+            // VIA浏览器风格：智能内容提取作为回退
+            console.log('VIA使用智能内容提取');
             return this.extractIntelligentContent();
         },
 
-        // 判断是否为小说内容
+        // VIA浏览器风格内容判断
         isLikelyNovelContent(text) {
             const novelIndicators = [
-                // 中文小说特征
+                // 中文特征
                 /第[零一二三四五六七八九十百千]+章/,
                 /[「」『』""""]/, // 对话引号
-                /说道|问道|喊道|笑道|心想|觉得/,
-                // 英文小说特征
+                /说道|问道|喊道|笑道|心想|觉得|看着|说道/,
+                /[\u4e00-\u9fa5]{10,}/, // 连续中文
+                // 英文特征
                 /chapter\s+\d+/i,
-                /said|asked|replied|thought|exclaimed/i,
-                /"[^"]*"/ // 英文对话
+                /said|asked|replied|thought|exclaimed|whispered/i,
+                /"[^"]*"/, // 英文对话
+                // 通用特征
+                /\n{2,}/, // 多个换行
+                /\.\s+[A-Z]/, // 句子开头大写
+                /\w{20,}/ // 长单词（可能包含中文）
             ];
 
             return novelIndicators.some(pattern => pattern.test(text));
         },
 
-        // 智能内容提取（类似VIA浏览器）
+        // VIA浏览器风格智能内容提取
         extractIntelligentContent() {
-            // 1. 尝试找到最大的文本块
-            const paragraphs = Array.from(document.querySelectorAll('p, div, span'))
-                .filter(el => {
-                    const text = el.textContent || '';
-                    return text.length > 50 && !this.isNoiseElement(el);
-                })
-                .sort((a, b) => (b.textContent.length - a.textContent.length));
-
-            if (paragraphs.length > 0) {
-                // 找到连续的段落
-                const contentContainer = document.createElement('div');
-                contentContainer.className = 'novel-reader-enhanced-content';
-                
-                let consecutiveCount = 0;
-                let lastElement = null;
-                
-                for (const p of paragraphs.slice(0, 20)) {
-                    if (this.isConsecutive(lastElement, p)) {
-                        consecutiveCount++;
-                        contentContainer.appendChild(p.cloneNode(true));
-                    } else if (consecutiveCount < 3) {
-                        contentContainer.innerHTML = '';
-                        contentContainer.appendChild(p.cloneNode(true));
-                        consecutiveCount = 1;
-                    }
-                    lastElement = p;
+            // 收集所有可能的段落
+            const allElements = Array.from(document.querySelectorAll('*'));
+            const contentElements = [];
+            
+            allElements.forEach(element => {
+                if (this.isContentElement(element)) {
+                    contentElements.push(element);
                 }
+            });
+
+            // 按文本长度排序
+            contentElements.sort((a, b) => {
+                const aText = a.textContent || '';
+                const bText = b.textContent || '';
+                return bText.length - aText.length;
+            });
+
+            // 创建内容容器
+            const contentContainer = document.createElement('div');
+            contentContainer.className = 'via-reader-content';
+
+            // 添加最有可能是内容的元素
+            let totalLength = 0;
+            for (let i = 0; i < Math.min(20, contentElements.length); i++) {
+                const element = contentElements[i];
+                const text = element.textContent || '';
                 
-                if (contentContainer.children.length >= 3) {
-                    return contentContainer;
+                if (text.length > 50) {
+                    const clone = element.cloneNode(true);
+                    this.cleanNoiseFromElement(clone);
+                    contentContainer.appendChild(clone);
+                    totalLength += text.length;
+                    
+                    // VIA浏览器风格：收集足够内容后停止
+                    if (totalLength > 800) break;
                 }
             }
 
-            // 2. 回退到body内容
-            return document.body;
+            return contentContainer.children.length > 0 ? contentContainer : null;
         },
 
-        // 判断是否为噪音元素
+        // VIA浏览器风格内容元素判断
+        isContentElement(element) {
+            if (!element || element.offsetWidth === 0 || element.offsetHeight === 0) {
+                return false;
+            }
+
+            if (this.isNoiseElement(element)) {
+                return false;
+            }
+
+            const tagName = element.tagName.toLowerCase();
+            const text = element.textContent || '';
+            
+            // 允许的元素类型
+            const allowedTags = ['p', 'div', 'span', 'article', 'section', 'main'];
+            if (!allowedTags.includes(tagName)) {
+                return false;
+            }
+
+            // 文本长度要求
+            if (text.length < 30) {
+                return false;
+            }
+
+            // 检查是否包含小说特征
+            return this.isLikelyNovelContent(text);
+        },
+
+        // VIA浏览器风格噪音清理
+        cleanNoiseFromElement(element) {
+            const noiseSelectors = [
+                'script', 'style', 'nav', 'header', 'footer', 
+                '.ad', '.advertisement', '.sidebar', '.comment',
+                '.social-share', '.related-posts', '.menu', '.navigation',
+                '.ads', '.ad-container', '.banner', '.popup',
+                '.share', '.toolbar', '.breadcrumb', '.pagination',
+                '.widget', '.recommend', '.hot', '.tags',
+                '.author', '.info', '.meta', '.date',
+                '.login', '.register', '.search', '.footer',
+                '.header', '.nav', '.navbar', '.menu'
+            ];
+            
+            noiseSelectors.forEach(selector => {
+                const elements = element.querySelectorAll(selector);
+                elements.forEach(el => el.remove());
+            });
+        },
+
+        // VIA浏览器风格噪音判断
         isNoiseElement(element) {
             const noiseSelectors = [
                 'script', 'style', 'nav', 'header', 'footer', 
                 '.ad', '.advertisement', '.sidebar', '.comment',
-                '.social-share', '.related-posts', '.menu', '.navigation'
+                '.social-share', '.related-posts', '.menu', '.navigation',
+                '.ads', '.ad-container', '.banner', '.popup',
+                '.share', '.toolbar', '.breadcrumb', '.pagination',
+                '.widget', '.recommend', '.hot', '.tags',
+                '.author', '.info', '.meta', '.date',
+                '.login', '.register', '.search'
             ];
             
-            return noiseSelectors.some(selector => 
+            // 选择器匹配
+            const isNoiseBySelector = noiseSelectors.some(selector => 
                 element.matches(selector) || element.closest(selector)
             );
-        },
-
-        // 判断元素是否连续
-        isConsecutive(prev, current) {
-            if (!prev) return true;
             
-            const prevRect = prev.getBoundingClientRect();
-            const currentRect = current.getBoundingClientRect();
+            // 内容关键词匹配
+            if (!isNoiseBySelector) {
+                const text = element.textContent || '';
+                const noiseKeywords = [
+                    '广告', '推广', 'sponsored', 'advertisement', '推荐',
+                    '登录', '注册', '搜索', '菜单', '导航',
+                    'copyright', '版权所有', 'all rights reserved'
+                ];
+                if (noiseKeywords.some(keyword => text.toLowerCase().includes(keyword.toLowerCase()))) {
+                    return true;
+                }
+            }
             
-            return Math.abs(currentRect.top - (prevRect.top + prevRect.height)) < 50;
+            return isNoiseBySelector;
         }
     };
 
-    // 章节导航器
-    const ChapterNavigator = {
-        // 查找章节链接
+    // VIA浏览器风格章节导航器
+    const VIAChapterNavigator = {
+        // VIA浏览器风格链接查找
         findChapterLinks() {
-            const links = Array.from(document.querySelectorAll('a[href]'));
+            const allLinks = Array.from(document.querySelectorAll('a[href]'));
+            const chapterLinks = [];
             
-            const chapterLinks = links.filter(link => {
-                const href = link.href.toLowerCase();
-                const text = link.textContent.toLowerCase();
-                
-                // URL特征
-                const urlPatterns = [
-                    /chapter|chap|ch\.?\/?\d+/i,
-                    /第[零一二三四五六七八九十百千]+章/,
-                    /\d+\/\d+\.html?/, // 类似 123/456.html
-                    /read|novel|book.*\d+/i
-                ];
-                
-                // 文本特征
-                const textPatterns = [
-                    /上一[章节回]|下一[章节回]/,
-                    /第[零一二三四五六七八九十百千]+章/,
-                    /chapter\s+\d+/i,
-                    /prev|next|previous/i
-                ];
-                
-                const hasUrlPattern = urlPatterns.some(pattern => pattern.test(href));
-                const hasTextPattern = textPatterns.some(pattern => pattern.test(text));
-                
-                return hasUrlPattern || hasTextPattern;
+            allLinks.forEach(link => {
+                if (this.isChapterLink(link)) {
+                    chapterLinks.push(link);
+                }
             });
             
             return chapterLinks;
         },
 
-        // 查找上一章链接
-        findPrevChapter() {
-            const links = this.findChapterLinks();
-            const prevKeywords = ['上一', '上一章', '上一节', 'prev', 'previous', '前'];
+        // VIA浏览器风格链接判断
+        isChapterLink(link) {
+            const href = link.href.toLowerCase();
+            const text = (link.textContent || '').toLowerCase().trim();
+            const title = (link.title || '').toLowerCase();
             
-            return links.find(link => {
-                const text = link.textContent.toLowerCase();
-                return prevKeywords.some(keyword => text.includes(keyword));
-            });
+            // URL模式匹配
+            const urlPatterns = [
+                /chapter|chap|ch\.?\/?\d+/i,
+                /第[零一二三四五六七八九十百千]+章/,
+                /\d+\/\d+\.html?/,
+                /read|novel|book.*\d+/i,
+                /\/\d+\.html?$/,
+                /\/\d+\/$/
+            ];
+            
+            // 文本模式匹配
+            const textPatterns = [
+                /上一[章节回]|下一[章节回]/,
+                /第[零一二三四五六七八九十百千]+章/,
+                /chapter\s+\d+/i,
+                /prev|next|previous/i,
+                /^[\d\.]+$/ // 纯数字章节号
+            ];
+            
+            const hasUrlPattern = urlPatterns.some(pattern => pattern.test(href));
+            const hasTextPattern = textPatterns.some(pattern => pattern.test(text) || pattern.test(title));
+            
+            // VIA浏览器风格：宽松匹配
+            return hasUrlPattern || hasTextPattern || text.length <= 20 && /\d+/.test(text);
         },
 
-        // 查找下一章链接
-        findNextChapter() {
-            const links = this.findChapterLinks();
-            const nextKeywords = ['下一', '下一章', '下一节', 'next', '后'];
-            
-            return links.find(link => {
-                const text = link.textContent.toLowerCase();
-                return nextKeywords.some(keyword => text.includes(keyword));
-            });
-        },
-
-        // 智能导航到章节
+        // VIA浏览器风格智能导航
         navigateToChapter(direction) {
+            console.log(`VIA导航: 尝试${direction === 'next' ? '下一章' : '上一章'}`);
+            
+            // 保存当前状态
+            this.savePageState();
+            
+            // 查找链接
             const link = direction === 'prev' ? this.findPrevChapter() : this.findNextChapter();
             
             if (link) {
-                // 保存当前状态
-                this.savePageState();
+                console.log('VIA找到章节链接:', link.href);
+                return this.safeNavigate(link);
+            } else {
+                console.log('VIA未找到明确链接，尝试智能导航');
+                return this.smartNavigate(direction);
+            }
+        },
+
+        // VIA浏览器风格安全导航
+        safeNavigate(link) {
+            return new Promise((resolve) => {
+                // VIA浏览器风格：平滑过渡
+                if (state.isReadingMode) {
+                    ReadingModeManager.exit();
+                }
                 
-                // 使用平滑过渡
-                this.prepareNavigation(() => {
-                    link.click();
-                });
+                setTimeout(() => {
+                    try {
+                        // 方法1: 直接跳转
+                        if (link.href && link.href !== window.location.href) {
+                            window.location.href = link.href;
+                            resolve(true);
+                            return;
+                        }
+                        
+                        // 方法2: 事件触发
+                        const clickEvent = new MouseEvent('click', {
+                            view: window,
+                            bubbles: true,
+                            cancelable: true
+                        });
+                        link.dispatchEvent(clickEvent);
+                        
+                        // 方法3: 模拟点击
+                        setTimeout(() => {
+                            link.click();
+                        }, 100);
+                        
+                        resolve(true);
+                    } catch (error) {
+                        console.error('VIA导航失败:', error);
+                        resolve(false);
+                    }
+                }, 200);
+            });
+        },
+
+        // VIA浏览器风格查找上一章
+        findPrevChapter() {
+            const links = this.findChapterLinks();
+            const currentUrl = window.location.href;
+            
+            // 基于URL模式查找
+            for (const link of links) {
+                const text = (link.textContent || '').toLowerCase();
+                if (text.includes('上一') || text.includes('prev') || text.includes('previous')) {
+                    return link;
+                }
+            }
+            
+            // 智能查找
+            return this.findChapterByPattern(links, 'prev');
+        },
+
+        // VIA浏览器风格查找下一章
+        findNextChapter() {
+            const links = this.findChapterLinks();
+            const currentUrl = window.location.href;
+            
+            // 基于URL模式查找
+            for (const link of links) {
+                const text = (link.textContent || '').toLowerCase();
+                if (text.includes('下一') || text.includes('next')) {
+                    return link;
+                }
+            }
+            
+            // 智能查找
+            return this.findChapterByPattern(links, 'next');
+        },
+
+        // VIA浏览器风格智能查找
+        findChapterByPattern(links, direction) {
+            const currentUrl = window.location.href;
+            const currentChapter = this.extractChapterNumber(currentUrl);
+            
+            if (currentChapter !== null) {
+                const targetChapter = direction === 'next' ? currentChapter + 1 : currentChapter - 1;
                 
-                return true;
+                for (const link of links) {
+                    const linkChapter = this.extractChapterNumber(link.href);
+                    if (linkChapter === targetChapter) {
+                        return link;
+                    }
+                }
+            }
+            
+            // 回退：返回第一个或最后一个链接
+            return links.length > 0 ? (direction === 'next' ? links[links.length - 1] : links[0]) : null;
+        },
+
+        // VIA浏览器风格章节号提取
+        extractChapterNumber(url) {
+            const patterns = [
+                /(\d+)\.html?$/,
+                /\/(\d+)\/$/,
+                /chapter[_-]?(\d+)/i,
+                /第(\d+)章/,
+                /ch\.?(\d+)/i
+            ];
+            
+            for (const pattern of patterns) {
+                const match = url.match(pattern);
+                if (match && match[1]) {
+                    return parseInt(match[1], 10);
+                }
+            }
+            
+            return null;
+        },
+
+        // VIA浏览器风格智能导航
+        smartNavigate(direction) {
+            console.log(`VIA智能导航: ${direction}`);
+            
+            // 尝试多种导航策略
+            const strategies = [
+                () => this.tryPagination(direction),
+                () => this.tryUrlPattern(direction),
+                () => this.tryContentNavigation(direction)
+            ];
+            
+            for (const strategy of strategies) {
+                const result = strategy();
+                if (result) {
+                    return result;
+                }
             }
             
             return false;
         },
 
-        // 保存页面状态
-        savePageState() {
-            pageState.currentUrl = window.location.href;
-            pageState.scrollPosition = window.pageYOffset;
-            pageState.readingModeActive = isReadingMode;
+        // VIA浏览器风格分页导航
+        tryPagination(direction) {
+            const paginationSelectors = [
+                '.pagination', '.page-nav', '.chapter-nav',
+                '.next-page', '.prev-page', '.page-next', '.page-prev'
+            ];
             
-            GM_setValue('lastPageState', pageState);
+            for (const selector of paginationSelectors) {
+                const element = document.querySelector(selector);
+                if (element) {
+                    const links = element.querySelectorAll('a');
+                    for (const link of links) {
+                        const text = (link.textContent || '').toLowerCase();
+                        if ((direction === 'next' && (text.includes('下一') || text.includes('next'))) ||
+                            (direction === 'prev' && (text.includes('上一') || text.includes('prev')))) {
+                            return this.safeNavigate(link);
+                        }
+                    }
+                }
+            }
+            
+            return false;
         },
 
-        // 准备导航（平滑过渡）
-        prepareNavigation(callback) {
-            if (isReadingMode) {
-                // 在阅读模式下，先退出阅读模式再导航
-                exitReadingMode();
-                setTimeout(callback, 100);
-            } else {
-                callback();
+        // VIA浏览器风格URL模式导航
+        tryUrlPattern(direction) {
+            const currentUrl = window.location.href;
+            const currentChapter = this.extractChapterNumber(currentUrl);
+            
+            if (currentChapter !== null) {
+                const targetChapter = direction === 'next' ? currentChapter + 1 : currentChapter - 1;
+                const newUrl = currentUrl.replace(
+                    /(\d+)(\.html?|\/)?$/,
+                    targetChapter + '$2'
+                );
+                
+                if (newUrl !== currentUrl) {
+                    this.savePageState();
+                    setTimeout(() => {
+                        window.location.href = newUrl;
+                    }, 100);
+                    return true;
+                }
+            }
+            
+            return false;
+        },
+
+        // VIA浏览器风格内容导航
+        tryContentNavigation(direction) {
+            // 在页面底部或顶部查找导航元素
+            const contentArea = VIAPageDetector.findContentArea();
+            if (contentArea) {
+                const navElements = contentArea.querySelectorAll('a, button, .nav, .navigation');
+                for (const element of navElements) {
+                    const text = (element.textContent || '').toLowerCase();
+                    if ((direction === 'next' && (text.includes('下一') || text.includes('next'))) ||
+                        (direction === 'prev' && (text.includes('上一') || text.includes('prev')))) {
+                        return this.safeNavigate(element);
+                    }
+                }
+            }
+            
+            return false;
+        },
+
+        // VIA浏览器风格状态保存
+        savePageState() {
+            state.pageState = {
+                currentUrl: window.location.href,
+                scrollPosition: window.pageYOffset,
+                readingModeActive: state.isReadingMode,
+                chapterTitle: document.title
+            };
+            
+            try {
+                GM_setValue('pageState', state.pageState);
+            } catch (error) {
+                console.warn('VIA状态保存失败:', error);
+            }
+        },
+
+        // VIA浏览器风格状态恢复
+        restorePageState() {
+            try {
+                const savedState = GM_getValue('pageState');
+                if (savedState && savedState.currentUrl === window.location.href) {
+                    state.pageState = savedState;
+                    
+                    if (savedState.readingModeActive && !state.isReadingMode) {
+                        setTimeout(() => {
+                            ReadingModeManager.enter();
+                        }, 500);
+                    }
+                    
+                    setTimeout(() => {
+                        window.scrollTo(0, savedState.scrollPosition);
+                    }, 1000);
+                }
+            } catch (error) {
+                console.warn('VIA状态恢复失败:', error);
             }
         }
     };
 
-    // 阅读模式管理器
+    // VIA浏览器风格阅读模式管理器
     const ReadingModeManager = {
         // 进入阅读模式
         enter() {
-            if (isReadingMode) return;
+            if (state.isReadingMode) return;
+            
+            console.log('VIA进入阅读模式');
+            state.isReadingMode = true;
             
             // 保存原始内容
-            this.saveOriginalContent();
+            state.originalBodyContent = document.body.innerHTML;
             
-            // 创建增强内容
-            this.createEnhancedContent();
+            // 提取内容
+            const contentArea = VIAPageDetector.findContentArea();
+            if (contentArea) {
+                state.enhancedContent = this.createEnhancedContent(contentArea);
+                document.body.innerHTML = '';
+                document.body.appendChild(state.enhancedContent);
+            } else {
+                // 回退：清理页面
+                this.cleanPageForReading();
+            }
             
-            // 应用阅读模式样式
-            this.applyReadingMode();
+            // 应用样式
+            this.applyReadingStyles();
             
-            isReadingMode = true;
-            this.updateUI();
+            // 显示控制面板
+            this.showControlPanel();
+            
+            // 保存状态
+            VIAChapterNavigator.savePageState();
         },
 
         // 退出阅读模式
         exit() {
-            if (!isReadingMode) return;
+            if (!state.isReadingMode) return;
+            
+            console.log('VIA退出阅读模式');
+            state.isReadingMode = false;
             
             // 恢复原始内容
-            this.restoreOriginalContent();
-            
-            // 移除阅读模式样式
-            this.removeReadingMode();
-            
-            isReadingMode = false;
-            this.updateUI();
-        },
-
-        // 保存原始内容
-        saveOriginalContent() {
-            originalBodyContent = document.body.innerHTML;
-        },
-
-        // 恢复原始内容
-        restoreOriginalContent() {
-            if (originalBodyContent) {
-                document.body.innerHTML = originalBodyContent;
-                originalBodyContent = null;
+            if (state.originalBodyContent) {
+                document.body.innerHTML = state.originalBodyContent;
             }
+            
+            // 移除样式
+            this.removeReadingStyles();
+            
+            // 隐藏控制面板
+            this.hideControlPanel();
+            
+            // 保存状态
+            VIAChapterNavigator.savePageState();
         },
 
         // 创建增强内容
-        createEnhancedContent() {
-            const contentArea = PageDetector.findContentArea();
-            if (!contentArea) return;
-
-            enhancedContent = contentArea.cloneNode(true);
-            enhancedContent.className = 'novel-reader-enhanced-main-content';
+        createEnhancedContent(contentArea) {
+            const container = document.createElement('div');
+            container.className = 'via-reader-container';
             
-            // 清空body并添加增强内容
-            document.body.innerHTML = '';
-            document.body.appendChild(enhancedContent);
+            // 添加标题
+            const title = this.extractChapterTitle();
+            if (title) {
+                const titleElement = document.createElement('h1');
+                titleElement.className = 'via-chapter-title';
+                titleElement.textContent = title;
+                container.appendChild(titleElement);
+            }
             
-            // 添加阅读器控制栏
-            this.addReaderControls();
+            // 添加内容
+            const contentClone = contentArea.cloneNode(true);
+            VIAPageDetector.cleanNoiseFromElement(contentClone);
+            container.appendChild(contentClone);
+            
+            // 添加导航
+            const navigation = this.createNavigation();
+            container.appendChild(navigation);
+            
+            return container;
         },
 
-        // 添加阅读器控制栏
-        addReaderControls() {
-            const controls = document.createElement('div');
-            controls.className = 'novel-reader-controls';
-            controls.innerHTML = `
-                <div class="reader-header">
-                    <button class="reader-btn" onclick="window.novelReader.exitReadingMode()">退出</button>
-                    <button class="reader-btn" onclick="window.novelReader.prevChapter()">上一章</button>
-                    <button class="reader-btn" onclick="window.novelReader.nextChapter()">下一章</button>
-                    <button class="reader-btn" onclick="window.novelReader.toggleAutoScroll()">
-                        ${autoScrollInterval ? '停止' : '自动'}
-                    </button>
-                </div>
-            `;
+        // 提取章节标题
+        extractChapterTitle() {
+            const titleSelectors = [
+                'h1', 'h2', 'h3', '.chapter-title', '.title', 
+                '.novel-title', '.entry-title', '.post-title'
+            ];
             
-            document.body.insertBefore(controls, enhancedContent);
+            for (const selector of titleSelectors) {
+                const element = document.querySelector(selector);
+                if (element) {
+                    const text = element.textContent.trim();
+                    if (text && text.length > 0 && text.length < 200) {
+                        return text;
+                    }
+                }
+            }
+            
+            return document.title;
         },
 
-        // 应用阅读模式样式
-        applyReadingMode() {
-            const settings = GM_getValue('novelReaderSettings', getDefaultSettings());
+        // 创建导航
+        createNavigation() {
+            const nav = document.createElement('div');
+            nav.className = 'via-navigation';
             
+            const prevButton = document.createElement('button');
+            prevButton.className = 'via-nav-btn via-prev-btn';
+            prevButton.textContent = '上一章';
+            prevButton.onclick = () => VIAChapterNavigator.navigateToChapter('prev');
+            
+            const nextButton = document.createElement('button');
+            nextButton.className = 'via-nav-btn via-next-btn';
+            nextButton.textContent = '下一章';
+            nextButton.onclick = () => VIAChapterNavigator.navigateToChapter('next');
+            
+            nav.appendChild(prevButton);
+            nav.appendChild(nextButton);
+            
+            return nav;
+        },
+
+        // 清理页面用于阅读
+        cleanPageForReading() {
+            const noiseSelectors = [
+                'script', 'style', 'nav', 'header', 'footer',
+                '.ad', '.advertisement', '.sidebar', '.comment',
+                '.social-share', '.related-posts', '.menu', '.navigation',
+                '.ads', '.ad-container', '.banner', '.popup',
+                '.share', '.toolbar', '.breadcrumb', '.pagination',
+                '.widget', '.recommend', '.hot', '.tags'
+            ];
+            
+            noiseSelectors.forEach(selector => {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(el => el.remove());
+            });
+        },
+
+        // 应用阅读样式
+        applyReadingStyles() {
             const style = document.createElement('style');
-            style.id = 'novel-reader-enhanced-styles';
+            style.id = 'via-reader-styles';
             style.textContent = `
-                .novel-reader-enhanced-main-content {
-                    max-width: ${settings.contentWidth}px !important;
-                    margin: 0 auto !important;
-                    padding: ${settings.margin}px 20px !important;
-                    font-size: ${settings.fontSize}px !important;
-                    line-height: ${settings.lineHeight} !important;
-                    background-color: ${getThemeBackground(settings.theme)} !important;
-                    color: ${getThemeTextColor(settings.theme)} !important;
-                    font-family: ${getFontFamily(settings.theme)} !important;
-                    text-align: justify !important;
+                .via-reader-container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    padding: 20px;
+                    line-height: 1.6;
+                    font-size: 16px;
+                    font-family: 'Microsoft YaHei', 'SimSun', serif;
+                    color: #333;
+                    background: #f8f8f8;
                 }
                 
-                .novel-reader-controls {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    background: rgba(255, 255, 255, 0.95);
-                    backdrop-filter: blur(10px);
-                    padding: 10px 20px;
-                    z-index: 10000;
+                .via-chapter-title {
+                    text-align: center;
+                    margin-bottom: 30px;
+                    font-size: 24px;
+                    color: #2c3e50;
+                    border-bottom: 2px solid #3498db;
+                    padding-bottom: 10px;
+                }
+                
+                .via-navigation {
                     display: flex;
-                    justify-content: center;
-                    gap: 10px;
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                    justify-content: space-between;
+                    margin-top: 40px;
+                    padding-top: 20px;
+                    border-top: 1px solid #ddd;
                 }
                 
-                .reader-btn {
-                    padding: 8px 16px;
-                    border: 1px solid #ddd;
+                .via-nav-btn {
+                    padding: 10px 20px;
+                    border: 1px solid #3498db;
                     background: white;
-                    border-radius: 4px;
+                    color: #3498db;
+                    border-radius: 5px;
                     cursor: pointer;
                     font-size: 14px;
                 }
                 
-                .reader-btn:hover {
+                .via-nav-btn:hover {
+                    background: #3498db;
+                    color: white;
+                }
+                
+                .via-control-panel {
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: white;
+                    border: 1px solid #ddd;
+                    border-radius: 8px;
+                    padding: 15px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                    z-index: 10000;
+                    min-width: 200px;
+                }
+                
+                .via-control-btn {
+                    display: block;
+                    width: 100%;
+                    padding: 8px 12px;
+                    margin: 5px 0;
+                    border: 1px solid #ddd;
+                    background: white;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    text-align: left;
+                }
+                
+                .via-control-btn:hover {
                     background: #f5f5f5;
                 }
                 
-                body {
-                    margin: 0 !important;
-                    padding: 60px 0 0 0 !important;
-                    background: ${getThemeBackground(settings.theme)} !important;
+                .via-control-btn.active {
+                    background: #3498db;
+                    color: white;
+                    border-color: #3498db;
+                }
+                
+                .via-floating-btn {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    width: 50px;
+                    height: 50px;
+                    background: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 50%;
+                    cursor: pointer;
+                    z-index: 10000;
+                    font-size: 20px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                }
+                
+                .via-floating-btn:hover {
+                    background: #2980b9;
+                    transform: scale(1.1);
                 }
             `;
-            
             document.head.appendChild(style);
         },
 
-        // 移除阅读模式样式
-        removeReadingMode() {
-            const style = document.getElementById('novel-reader-enhanced-styles');
+        // 移除阅读样式
+        removeReadingStyles() {
+            const style = document.getElementById('via-reader-styles');
             if (style) {
                 style.remove();
             }
         },
 
-        // 更新UI状态
-        updateUI() {
-            if (controlPanel) {
-                const toggleItem = controlPanel.querySelector('[data-action="toggle-reading"] span');
-                if (toggleItem) {
-                    toggleItem.textContent = isReadingMode ? '退出阅读模式' : '进入阅读模式';
-                }
+        // 显示控制面板
+        showControlPanel() {
+            if (state.controlPanel) {
+                state.controlPanel.style.display = 'block';
+                return;
             }
-        }
-    };
-
-    // 工具函数
-    function getDefaultSettings() {
-        return {
-            fontSize: 18,
-            lineHeight: 1.8,
-            theme: 'light',
-            autoScrollSpeed: 1,
-            traditionalToSimplified: false,
-            margin: 20,
-            contentWidth: 800
-        };
-    }
-
-    function getThemeBackground(theme) {
-        switch(theme) {
-            case 'dark': return '#1a1a1a';
-            case 'sepia': return '#f4ecd8';
-            case 'green': return '#e8f5e8';
-            default: return '#ffffff';
-        }
-    }
-
-    function getThemeTextColor(theme) {
-        switch(theme) {
-            case 'dark': return '#e0e0e0';
-            case 'sepia': return '#5c4b37';
-            case 'green': return '#2d5016';
-            default: return '#333333';
-        }
-    }
-
-    function getFontFamily(theme) {
-        return "'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'WenQuanYi Micro Hei', sans-serif";
-    }
-
-    // 暴露全局方法供HTML调用
-    window.novelReader = {
-        exitReadingMode: () => ReadingModeManager.exit(),
-        prevChapter: () => ChapterNavigator.navigateToChapter('prev'),
-        nextChapter: () => ChapterNavigator.navigateToChapter('next'),
-        toggleAutoScroll: () => toggleAutoScroll()
-    };
-
-    // 初始化
-    function init() {
-        console.log('小说阅读助手增强版初始化');
-        
-        // 加载用户设置
-        loadUserSettings();
-        
-        // 监听页面加载完成
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', setupReader);
-        } else {
-            setupReader();
-        }
-        
-        // 注册菜单命令
-        registerMenuCommands();
-    }
-
-    // 加载用户设置
-    function loadUserSettings() {
-        const settings = GM_getValue('novelReaderSettings', getDefaultSettings());
-        
-        currentScrollSpeed = settings.autoScrollSpeed;
-        isTraditionalToSimplified = settings.traditionalToSimplified;
-    }
-
-    // 保存用户设置
-    function saveUserSettings(settings) {
-        GM_setValue('novelReaderSettings', settings);
-    }
-
-    // 注册菜单命令
-    function registerMenuCommands() {
-        // 强制启用阅读模式
-        GM_registerMenuCommand('强制阅读模式', () => {
-            ReadingModeManager.enter();
-        });
-        
-        // 重置设置
-        GM_registerMenuCommand('重置设置', () => {
-            const defaultSettings = getDefaultSettings();
-            saveUserSettings(defaultSettings);
-            alert('设置已重置为默认值');
-        });
-    }
-
-    // 设置阅读器
-    function setupReader() {
-        // 检测是否为小说页面
-        if (PageDetector.isNovelPage()) {
-            showFloatingButton();
             
-            // 检查是否需要恢复阅读模式
-            const lastState = GM_getValue('lastPageState');
-            if (lastState && lastState.readingModeActive && 
-                lastState.currentUrl === window.location.href) {
-                setTimeout(() => {
-                    ReadingModeManager.enter();
-                    window.scrollTo(0, lastState.scrollPosition);
-                }, 500);
+            const panel = document.createElement('div');
+            panel.className = 'via-control-panel';
+            panel.innerHTML = `
+                <button class="via-control-btn" onclick="ReadingModeManager.exit()">退出阅读模式</button>
+                <button class="via-control-btn" onclick="VIAChapterNavigator.navigateToChapter('prev')">上一章</button>
+                <button class="via-control-btn" onclick="VIAChapterNavigator.navigateToChapter('next')">下一章</button>
+                <button class="via-control-btn" onclick="toggleAutoScroll()">自动滚动</button>
+            `;
+            
+            document.body.appendChild(panel);
+            state.controlPanel = panel;
+        },
+
+        // 隐藏控制面板
+        hideControlPanel() {
+            if (state.controlPanel) {
+                state.controlPanel.style.display = 'none';
             }
         }
-    }
+    };
 
-    // 显示悬浮按钮
-    function showFloatingButton() {
-        if (floatingButton) {
-            floatingButton.style.display = 'flex';
-            return;
-        }
-
-        floatingButton = document.createElement('div');
-        floatingButton.innerHTML = `
-            <span>阅</span>
-        `;
-
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
-        const buttonSize = isMobile ? 60 : 50;
-        const buttonBottom = isMobile ? 80 : 100;
-        const buttonRight = isMobile ? 15 : 20;
-        const fontSize = isMobile ? 22 : 18;
-
-        floatingButton.style.cssText = `
-            position: fixed;
-            bottom: ${buttonBottom}px;
-            right: ${buttonRight}px;
-            width: ${buttonSize}px;
-            height: ${buttonSize}px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            z-index: 10000;
-            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
-            transition: all 0.3s ease;
-            color: white;
-            font-size: ${fontSize}px;
-            font-weight: bold;
-            font-family: 'Microsoft YaHei', sans-serif;
-            user-select: none;
-            touch-action: manipulation;
-            -webkit-tap-highlight-color: transparent;
-        `;
-
-        floatingButton.addEventListener('click', showControlPanel);
-        document.body.appendChild(floatingButton);
-    }
-
-    // 显示控制面板
-    function showControlPanel() {
-        if (controlPanel) {
-            controlPanel.style.display = 'block';
-            return;
-        }
-
-        controlPanel = document.createElement('div');
-        controlPanel.innerHTML = `
-            <div class="control-panel-content">
-                <div class="control-section">
-                    <div class="section-title">阅读模式</div>
-                    <div class="control-item" data-action="toggle-reading">
-                        <span>${isReadingMode ? '退出阅读模式' : '进入阅读模式'}</span>
-                    </div>
-                </div>
-                
-                <div class="control-section">
-                    <div class="section-title">章节导航</div>
-                    <div class="control-item" data-action="prev-chapter">
-                        <span>上一章</span>
-                    </div>
-                    <div class="control-item" data-action="next-chapter">
-                        <span>下一章</span>
-                    </div>
-                    <div class="control-item" data-action="show-toc">
-                        <span>目录</span>
-                    </div>
-                </div>
-                
-                <div class="control-section">
-                    <div class="section-title">自动阅读</div>
-                    <div class="control-item" data-action="auto-scroll">
-                        <span>${autoScrollInterval ? '停止自动' : '开始自动'}</span>
-                    </div>
-                    <div class="control-item" data-action="speed-control">
-                        <span>速度: ${currentScrollSpeed}x</span>
-                    </div>
-                </div>
-                
-                <div class="control-section">
-                    <div class="section-title">显示设置</div>
-                    <div class="control-item" data-action="font-size">
-                        <span>字体大小</span>
-                    </div>
-                    <div class="control-item" data-action="line-height">
-                        <span>行高</span>
-                    </div>
-                    <div class="control-item" data-action="theme">
-                        <span>主题</span>
-                    </div>
-                    <div class="control-item" data-action="content-width">
-                        <span>内容宽度</span>
-                    </div>
-                    <div class="control-item" data-action="margin">
-                        <span>边距</span>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
-        const panelBottom = isMobile ? 150 : 160;
-        const panelRight = isMobile ? 10 : 20;
-
-        controlPanel.style.cssText = `
-            position: fixed;
-            bottom: ${panelBottom}px;
-            right: ${panelRight}px;
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 16px;
-            padding: 16px 0;
-            z-index: 10001;
-            min-width: ${isMobile ? 'calc(100vw - 40px)' : '200px'};
-            max-width: ${isMobile ? 'calc(100vw - 40px)' : '300px'};
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(20px);
-            display: block;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-            max-height: ${isMobile ? '60vh' : '400px'};
-            overflow-y: auto;
-        `;
-
-        const controlItems = controlPanel.querySelectorAll('.control-item');
-        controlItems.forEach(item => {
-            item.style.cssText = `
-                padding: 12px 16px;
-                cursor: pointer;
-                transition: all 0.2s;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                font-size: 14px;
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-            `;
-
-            item.addEventListener('click', (e) => {
-                e.stopPropagation();
-                handleControlAction(item.getAttribute('data-action'));
-            });
-        });
-
-        document.body.appendChild(controlPanel);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', hideControlPanel, { once: true });
-        }, 100);
-    }
-
-    // 隐藏控制面板
-    function hideControlPanel() {
-        if (controlPanel) {
-            controlPanel.style.display = 'none';
-        }
-    }
-
-    // 处理控制动作
-    function handleControlAction(action) {
-        switch (action) {
-            case 'toggle-reading':
-                toggleReadingMode();
-                break;
-            case 'prev-chapter':
-                ChapterNavigator.navigateToChapter('prev');
-                break;
-            case 'next-chapter':
-                ChapterNavigator.navigateToChapter('next');
-                break;
-            case 'show-toc':
-                showTableOfContents();
-                break;
-            case 'auto-scroll':
-                toggleAutoScroll();
-                break;
-            case 'speed-control':
-                showSpeedSelector();
-                break;
-            case 'font-size':
-                showFontSizeSelector();
-                break;
-            case 'line-height':
-                showLineHeightSelector();
-                break;
-            case 'theme':
-                showThemeSelector();
-                break;
-            case 'content-width':
-                showContentWidthSelector();
-                break;
-            case 'margin':
-                showMarginSelector();
-                break;
-        }
-        hideControlPanel();
-    }
-
-    // 切换阅读模式
-    function toggleReadingMode() {
-        if (isReadingMode) {
-            ReadingModeManager.exit();
-        } else {
-            ReadingModeManager.enter();
-        }
-    }
-
-    // 显示目录
-    function showTableOfContents() {
-        const tocLinks = [
-            document.querySelector('a[href*="toc"]'),
-            document.querySelector('a[href*="目录"]'),
-            document.querySelector('a[href*="chapter"]'),
-            document.querySelector('.toc'),
-            document.querySelector('.chapter-list')
-        ].filter(link => link);
+    // 浮动按钮管理
+    const FloatingButtonManager = {
+        create() {
+            if (state.floatingButton) return;
+            
+            const button = document.createElement('button');
+            button.className = 'via-floating-btn';
+            button.textContent = '📖';
+            button.title = 'VIA阅读模式';
+            button.onclick = () => {
+                if (state.isReadingMode) {
+                    ReadingModeManager.exit();
+                } else {
+                    ReadingModeManager.enter();
+                }
+            };
+            
+            document.body.appendChild(button);
+            state.floatingButton = button;
+        },
         
-        if (tocLinks.length > 0) {
-            tocLinks[0].click();
-        } else {
-            alert('未找到目录链接');
+        remove() {
+            if (state.floatingButton) {
+                state.floatingButton.remove();
+                state.floatingButton = null;
+            }
         }
-    }
+    };
 
-    // 切换自动滚动
+    // 自动滚动功能
+    let autoScrollInterval = null;
+    let currentScrollSpeed = 1;
+
     function toggleAutoScroll() {
         if (autoScrollInterval) {
             stopAutoScroll();
@@ -808,24 +1003,20 @@
         }
     }
 
-    // 开始自动滚动
     function startAutoScroll() {
-        const speed = 50 / currentScrollSpeed;
+        stopAutoScroll();
         
         autoScrollInterval = setInterval(() => {
-            window.scrollBy(0, 1);
+            window.scrollBy(0, currentScrollSpeed);
             
-            // 检查是否到达页面底部
+            // 检查是否到达底部
             if ((window.innerHeight + window.pageYOffset) >= document.body.offsetHeight - 10) {
-                // 到达底部，尝试翻页
-                if (ChapterNavigator.navigateToChapter('next')) {
-                    stopAutoScroll();
-                }
+                // 自动跳转到下一章
+                VIAChapterNavigator.navigateToChapter('next');
             }
-        }, speed);
+        }, 50);
     }
 
-    // 停止自动滚动
     function stopAutoScroll() {
         if (autoScrollInterval) {
             clearInterval(autoScrollInterval);
@@ -833,209 +1024,44 @@
         }
     }
 
-    // 显示速度选择器
-    function showSpeedSelector() {
-        showGenericSelector('speed', CONFIG.autoScrollSpeed, currentScrollSpeed, (speed) => {
-            currentScrollSpeed = speed;
-            const settings = GM_getValue('novelReaderSettings', {});
-            settings.autoScrollSpeed = speed;
-            saveUserSettings(settings);
-        });
-    }
-
-    // 显示字体大小选择器
-    function showFontSizeSelector() {
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentSize = settings.fontSize || 18;
-        
-        showGenericSelector('font-size', CONFIG.fontSize, currentSize, (size) => {
-            const settings = GM_getValue('novelReaderSettings', {});
-            settings.fontSize = size;
-            saveUserSettings(settings);
-            if (isReadingMode) {
-                ReadingModeManager.applyReadingMode();
-            }
-        });
-    }
-
-    // 显示行高选择器
-    function showLineHeightSelector() {
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentHeight = settings.lineHeight || 1.8;
-        
-        showGenericSelector('line-height', CONFIG.lineHeight, currentHeight, (height) => {
-            const settings = GM_getValue('novelReaderSettings', {});
-            settings.lineHeight = height;
-            saveUserSettings(settings);
-            if (isReadingMode) {
-                ReadingModeManager.applyReadingMode();
-            }
-        });
-    }
-
-    // 显示主题选择器
-    function showThemeSelector() {
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentTheme = settings.theme || 'light';
-        
-        showGenericSelector('theme', CONFIG.theme, currentTheme, (theme) => {
-            const settings = GM_getValue('novelReaderSettings', {});
-            settings.theme = theme;
-            saveUserSettings(settings);
-            if (isReadingMode) {
-                ReadingModeManager.applyReadingMode();
-            }
-        });
-    }
-
-    // 显示内容宽度选择器
-    function showContentWidthSelector() {
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentWidth = settings.contentWidth || 800;
-        
-        showGenericSelector('content-width', CONFIG.contentWidth, currentWidth, (width) => {
-            const settings = GM_getValue('novelReaderSettings', {});
-            settings.contentWidth = width;
-            saveUserSettings(settings);
-            if (isReadingMode) {
-                ReadingModeManager.applyReadingMode();
-            }
-        });
-    }
-
-    // 显示边距选择器
-    function showMarginSelector() {
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentMargin = settings.margin || 20;
-        
-        showGenericSelector('margin', CONFIG.margin, currentMargin, (margin) => {
-            const settings = GM_getValue('novelReaderSettings', {});
-            settings.margin = margin;
-            saveUserSettings(settings);
-            if (isReadingMode) {
-                ReadingModeManager.applyReadingMode();
-            }
-        });
-    }
-
-    // 通用选择器显示函数
-    function showGenericSelector(type, options, currentValue, callback) {
-        let selector = document.getElementById(`${type}-selector`);
-        if (selector) {
-            selector.style.display = 'flex';
-            return;
-        }
-
-        const typeNames = {
-            'speed': '滚动速度',
-            'font-size': '字体大小',
-            'line-height': '行高',
-            'theme': '主题',
-            'content-width': '内容宽度',
-            'margin': '边距'
-        };
-
-        selector = document.createElement('div');
-        selector.id = `${type}-selector`;
-        selector.innerHTML = `
-            <div class="selector-content">
-                <div class="selector-header">
-                    <span>${typeNames[type]}</span>
-                </div>
-                <div class="selector-options">
-                    ${options.map(option => `
-                        <div class="option" data-value="${option}">
-                            <span>${getOptionDisplayText(type, option)}</span>
-                            ${option === currentValue ? '<span class="selected">✓</span>' : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        selector.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 16px;
-            padding: 0;
-            z-index: 10002;
-            min-width: 150px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(20px);
-            display: flex;
-            flex-direction: column;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-        `;
-
-        const optionElements = selector.querySelectorAll('.option');
-        optionElements.forEach(option => {
-            option.style.cssText = `
-                padding: 12px 16px;
-                cursor: pointer;
-                transition: all 0.2s;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                font-size: 14px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            `;
-
-            option.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const value = type === 'font-size' || type === 'content-width' || type === 'margin' ? 
-                    parseInt(option.getAttribute('data-value')) : 
-                    parseFloat(option.getAttribute('data-value'));
-                callback(value);
-                selector.style.display = 'none';
-            });
-        });
-
-        document.body.appendChild(selector);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', (e) => {
-                if (!selector.contains(e.target)) {
-                    selector.style.display = 'none';
-                }
-            }, { once: true });
-        }, 100);
-    }
-
-    // 获取选项显示文本
-    function getOptionDisplayText(type, value) {
-        switch(type) {
-            case 'speed':
-                return `${value}x`;
-            case 'font-size':
-                return `${value}px`;
-            case 'line-height':
-                return value.toString();
-            case 'theme':
-                return getThemeName(value);
-            case 'content-width':
-                return `${value}px`;
-            case 'margin':
-                return `${value}px`;
-            default:
-                return value.toString();
+    function setScrollSpeed(speed) {
+        currentScrollSpeed = speed;
+        if (autoScrollInterval) {
+            stopAutoScroll();
+            startAutoScroll();
         }
     }
 
-    // 获取主题名称
-    function getThemeName(theme) {
-        switch(theme) {
-            case 'light': return '浅色';
-            case 'dark': return '深色';
-            case 'sepia': return '护眼';
-            case 'green': return '绿色';
-            default: return theme;
+    // 初始化
+    function init() {
+        console.log('VIA小说阅读助手初始化');
+        
+        // 检测页面类型
+        if (VIAPageDetector.isNovelPage()) {
+            console.log('检测到小说页面，创建浮动按钮');
+            FloatingButtonManager.create();
+            
+            // 恢复之前的状态
+            VIAChapterNavigator.restorePageState();
+            
+            // 注册菜单命令
+            try {
+                GM_registerMenuCommand('进入阅读模式', () => ReadingModeManager.enter());
+                GM_registerMenuCommand('退出阅读模式', () => ReadingModeManager.exit());
+                GM_registerMenuCommand('上一章', () => VIAChapterNavigator.navigateToChapter('prev'));
+                GM_registerMenuCommand('下一章', () => VIAChapterNavigator.navigateToChapter('next'));
+            } catch (error) {
+                console.warn('菜单命令注册失败:', error);
+            }
+        } else {
+            console.log('未检测到小说页面');
         }
     }
 
     // 启动脚本
-    init();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
