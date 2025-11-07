@@ -1,43 +1,514 @@
 // ==UserScript==
-// @name         小说阅读助手
+// @name         小说阅读助手增强版
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  通用小说阅读助手，支持翻页、繁简体切换、自动阅读等功能
-// @author       Novel Reader
+// @version      2.0
+// @description  基于VIA浏览器阅读模式理念优化的通用小说阅读助手
+// @author       Novel Reader Enhanced
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_addStyle
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // 配置
+    // 增强配置
     const CONFIG = {
-        autoScrollSpeed: [0.5, 1, 1.5, 2, 2.5, 3], // 自动滚动速度
-        fontSize: [12, 14, 16, 18, 20, 22, 24], // 字体大小
-        lineHeight: [1.2, 1.4, 1.6, 1.8, 2.0], // 行高
-        theme: ['light', 'dark', 'sepia'] // 主题
+        autoScrollSpeed: [0.5, 1, 1.5, 2, 2.5, 3],
+        fontSize: [12, 14, 16, 18, 20, 22, 24, 26, 28],
+        lineHeight: [1.2, 1.4, 1.6, 1.8, 2.0, 2.2],
+        theme: ['light', 'dark', 'sepia', 'green'],
+        margin: [0, 10, 20, 30, 40, 50],
+        contentWidth: [600, 700, 800, 900, 1000, 1200]
     };
 
-    // 检测是否为移动设备
-    function isMobileDevice() {
-        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-               window.innerWidth <= 768;
-    }
-
-    // 全局变量
+    // 全局状态
     let floatingButton = null;
     let controlPanel = null;
     let isReadingMode = false;
     let autoScrollInterval = null;
     let currentScrollSpeed = 1;
     let isTraditionalToSimplified = false;
+    let originalBodyContent = null;
+    let enhancedContent = null;
+    let pageState = {
+        currentUrl: window.location.href,
+        scrollPosition: 0,
+        readingModeActive: false
+    };
+
+    // 智能页面检测器
+    const PageDetector = {
+        // 小说网站特征库
+        novelSites: [
+            // 中文小说网站
+            'qidian.com', 'zongheng.com', '17k.com', 'hongxiu.com',
+            'xxsy.net', 'jinjiang.com', 'booktxt.net', 'biquge.com',
+            'x23us.com', 'dingdiann.com', 'shuquge.com', 'biquku.com',
+            // 英文小说网站
+            'wattpad.com', 'royalroad.com', 'webnovel.com', 'novelupdates.com'
+        ],
+
+        // 小说内容特征
+        contentPatterns: [
+            /第[零一二三四五六七八九十百千]+章/,
+            /chapter\s+\d+/i,
+            /[上下]?一?[章节回]/,
+            /正文开始|正文内容|小说内容/,
+            /novel|chapter|volume/i
+        ],
+
+        // 章节导航特征
+        navPatterns: [
+            /上一[章节回]|下一[章节回]/,
+            /prev|next/i,
+            /chapter.*nav|nav.*chapter/i,
+            /目录|章节列表|table of contents/i
+        ],
+
+        // 检测是否为小说页面
+        isNovelPage() {
+            const url = window.location.href.toLowerCase();
+            const domain = window.location.hostname.toLowerCase();
+            
+            // 1. 检查域名是否匹配已知小说网站
+            if (this.novelSites.some(site => domain.includes(site))) {
+                return true;
+            }
+
+            // 2. 检查URL路径特征
+            const path = window.location.pathname.toLowerCase();
+            if (path.includes('/chapter/') || path.includes('/read/') || 
+                path.includes('/novel/') || path.includes('/book/')) {
+                return true;
+            }
+
+            // 3. 检查页面内容特征
+            const textContent = document.body.textContent || '';
+            const hasNovelKeywords = this.contentPatterns.some(pattern => 
+                pattern.test(textContent)
+            );
+
+            // 4. 检查章节导航
+            const hasChapterNav = this.navPatterns.some(pattern => 
+                pattern.test(textContent)
+            );
+
+            // 5. 检查是否有章节内容区域
+            const hasContentArea = this.findContentArea() !== null;
+
+            return hasNovelKeywords || hasChapterNav || hasContentArea;
+        },
+
+        // 智能查找内容区域
+        findContentArea() {
+            const contentSelectors = [
+                // 中文小说网站常用选择器
+                '.content', '.chapter-content', '.novel-content', '.read-content',
+                '.text-content', '.article-content', '.chapter-text', '.book-content',
+                '#content', '#chapter-content', '#novel-content', '#read-content',
+                // 英文小说网站常用选择器
+                '.chapter', '.chapter-body', '.chapter-content', '.novel-body',
+                '.entry-content', '.post-content', '.story-content',
+                // 通用选择器
+                'article', 'main', '[role="main"]', '.main-content'
+            ];
+
+            for (const selector of contentSelectors) {
+                const elements = document.querySelectorAll(selector);
+                for (const element of elements) {
+                    const text = element.textContent || '';
+                    if (text.length > 300 && this.isLikelyNovelContent(text)) {
+                        return element;
+                    }
+                }
+            }
+
+            // 回退到智能内容提取
+            return this.extractIntelligentContent();
+        },
+
+        // 判断是否为小说内容
+        isLikelyNovelContent(text) {
+            const novelIndicators = [
+                // 中文小说特征
+                /第[零一二三四五六七八九十百千]+章/,
+                /[「」『』""""]/, // 对话引号
+                /说道|问道|喊道|笑道|心想|觉得/,
+                // 英文小说特征
+                /chapter\s+\d+/i,
+                /said|asked|replied|thought|exclaimed/i,
+                /"[^"]*"/ // 英文对话
+            ];
+
+            return novelIndicators.some(pattern => pattern.test(text));
+        },
+
+        // 智能内容提取（类似VIA浏览器）
+        extractIntelligentContent() {
+            // 1. 尝试找到最大的文本块
+            const paragraphs = Array.from(document.querySelectorAll('p, div, span'))
+                .filter(el => {
+                    const text = el.textContent || '';
+                    return text.length > 50 && !this.isNoiseElement(el);
+                })
+                .sort((a, b) => (b.textContent.length - a.textContent.length));
+
+            if (paragraphs.length > 0) {
+                // 找到连续的段落
+                const contentContainer = document.createElement('div');
+                contentContainer.className = 'novel-reader-enhanced-content';
+                
+                let consecutiveCount = 0;
+                let lastElement = null;
+                
+                for (const p of paragraphs.slice(0, 20)) {
+                    if (this.isConsecutive(lastElement, p)) {
+                        consecutiveCount++;
+                        contentContainer.appendChild(p.cloneNode(true));
+                    } else if (consecutiveCount < 3) {
+                        contentContainer.innerHTML = '';
+                        contentContainer.appendChild(p.cloneNode(true));
+                        consecutiveCount = 1;
+                    }
+                    lastElement = p;
+                }
+                
+                if (contentContainer.children.length >= 3) {
+                    return contentContainer;
+                }
+            }
+
+            // 2. 回退到body内容
+            return document.body;
+        },
+
+        // 判断是否为噪音元素
+        isNoiseElement(element) {
+            const noiseSelectors = [
+                'script', 'style', 'nav', 'header', 'footer', 
+                '.ad', '.advertisement', '.sidebar', '.comment',
+                '.social-share', '.related-posts', '.menu', '.navigation'
+            ];
+            
+            return noiseSelectors.some(selector => 
+                element.matches(selector) || element.closest(selector)
+            );
+        },
+
+        // 判断元素是否连续
+        isConsecutive(prev, current) {
+            if (!prev) return true;
+            
+            const prevRect = prev.getBoundingClientRect();
+            const currentRect = current.getBoundingClientRect();
+            
+            return Math.abs(currentRect.top - (prevRect.top + prevRect.height)) < 50;
+        }
+    };
+
+    // 章节导航器
+    const ChapterNavigator = {
+        // 查找章节链接
+        findChapterLinks() {
+            const links = Array.from(document.querySelectorAll('a[href]'));
+            
+            const chapterLinks = links.filter(link => {
+                const href = link.href.toLowerCase();
+                const text = link.textContent.toLowerCase();
+                
+                // URL特征
+                const urlPatterns = [
+                    /chapter|chap|ch\.?\/?\d+/i,
+                    /第[零一二三四五六七八九十百千]+章/,
+                    /\d+\/\d+\.html?/, // 类似 123/456.html
+                    /read|novel|book.*\d+/i
+                ];
+                
+                // 文本特征
+                const textPatterns = [
+                    /上一[章节回]|下一[章节回]/,
+                    /第[零一二三四五六七八九十百千]+章/,
+                    /chapter\s+\d+/i,
+                    /prev|next|previous/i
+                ];
+                
+                const hasUrlPattern = urlPatterns.some(pattern => pattern.test(href));
+                const hasTextPattern = textPatterns.some(pattern => pattern.test(text));
+                
+                return hasUrlPattern || hasTextPattern;
+            });
+            
+            return chapterLinks;
+        },
+
+        // 查找上一章链接
+        findPrevChapter() {
+            const links = this.findChapterLinks();
+            const prevKeywords = ['上一', '上一章', '上一节', 'prev', 'previous', '前'];
+            
+            return links.find(link => {
+                const text = link.textContent.toLowerCase();
+                return prevKeywords.some(keyword => text.includes(keyword));
+            });
+        },
+
+        // 查找下一章链接
+        findNextChapter() {
+            const links = this.findChapterLinks();
+            const nextKeywords = ['下一', '下一章', '下一节', 'next', '后'];
+            
+            return links.find(link => {
+                const text = link.textContent.toLowerCase();
+                return nextKeywords.some(keyword => text.includes(keyword));
+            });
+        },
+
+        // 智能导航到章节
+        navigateToChapter(direction) {
+            const link = direction === 'prev' ? this.findPrevChapter() : this.findNextChapter();
+            
+            if (link) {
+                // 保存当前状态
+                this.savePageState();
+                
+                // 使用平滑过渡
+                this.prepareNavigation(() => {
+                    link.click();
+                });
+                
+                return true;
+            }
+            
+            return false;
+        },
+
+        // 保存页面状态
+        savePageState() {
+            pageState.currentUrl = window.location.href;
+            pageState.scrollPosition = window.pageYOffset;
+            pageState.readingModeActive = isReadingMode;
+            
+            GM_setValue('lastPageState', pageState);
+        },
+
+        // 准备导航（平滑过渡）
+        prepareNavigation(callback) {
+            if (isReadingMode) {
+                // 在阅读模式下，先退出阅读模式再导航
+                exitReadingMode();
+                setTimeout(callback, 100);
+            } else {
+                callback();
+            }
+        }
+    };
+
+    // 阅读模式管理器
+    const ReadingModeManager = {
+        // 进入阅读模式
+        enter() {
+            if (isReadingMode) return;
+            
+            // 保存原始内容
+            this.saveOriginalContent();
+            
+            // 创建增强内容
+            this.createEnhancedContent();
+            
+            // 应用阅读模式样式
+            this.applyReadingMode();
+            
+            isReadingMode = true;
+            this.updateUI();
+        },
+
+        // 退出阅读模式
+        exit() {
+            if (!isReadingMode) return;
+            
+            // 恢复原始内容
+            this.restoreOriginalContent();
+            
+            // 移除阅读模式样式
+            this.removeReadingMode();
+            
+            isReadingMode = false;
+            this.updateUI();
+        },
+
+        // 保存原始内容
+        saveOriginalContent() {
+            originalBodyContent = document.body.innerHTML;
+        },
+
+        // 恢复原始内容
+        restoreOriginalContent() {
+            if (originalBodyContent) {
+                document.body.innerHTML = originalBodyContent;
+                originalBodyContent = null;
+            }
+        },
+
+        // 创建增强内容
+        createEnhancedContent() {
+            const contentArea = PageDetector.findContentArea();
+            if (!contentArea) return;
+
+            enhancedContent = contentArea.cloneNode(true);
+            enhancedContent.className = 'novel-reader-enhanced-main-content';
+            
+            // 清空body并添加增强内容
+            document.body.innerHTML = '';
+            document.body.appendChild(enhancedContent);
+            
+            // 添加阅读器控制栏
+            this.addReaderControls();
+        },
+
+        // 添加阅读器控制栏
+        addReaderControls() {
+            const controls = document.createElement('div');
+            controls.className = 'novel-reader-controls';
+            controls.innerHTML = `
+                <div class="reader-header">
+                    <button class="reader-btn" onclick="window.novelReader.exitReadingMode()">退出</button>
+                    <button class="reader-btn" onclick="window.novelReader.prevChapter()">上一章</button>
+                    <button class="reader-btn" onclick="window.novelReader.nextChapter()">下一章</button>
+                    <button class="reader-btn" onclick="window.novelReader.toggleAutoScroll()">
+                        ${autoScrollInterval ? '停止' : '自动'}
+                    </button>
+                </div>
+            `;
+            
+            document.body.insertBefore(controls, enhancedContent);
+        },
+
+        // 应用阅读模式样式
+        applyReadingMode() {
+            const settings = GM_getValue('novelReaderSettings', getDefaultSettings());
+            
+            const style = document.createElement('style');
+            style.id = 'novel-reader-enhanced-styles';
+            style.textContent = `
+                .novel-reader-enhanced-main-content {
+                    max-width: ${settings.contentWidth}px !important;
+                    margin: 0 auto !important;
+                    padding: ${settings.margin}px 20px !important;
+                    font-size: ${settings.fontSize}px !important;
+                    line-height: ${settings.lineHeight} !important;
+                    background-color: ${getThemeBackground(settings.theme)} !important;
+                    color: ${getThemeTextColor(settings.theme)} !important;
+                    font-family: ${getFontFamily(settings.theme)} !important;
+                    text-align: justify !important;
+                }
+                
+                .novel-reader-controls {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    background: rgba(255, 255, 255, 0.95);
+                    backdrop-filter: blur(10px);
+                    padding: 10px 20px;
+                    z-index: 10000;
+                    display: flex;
+                    justify-content: center;
+                    gap: 10px;
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                }
+                
+                .reader-btn {
+                    padding: 8px 16px;
+                    border: 1px solid #ddd;
+                    background: white;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-size: 14px;
+                }
+                
+                .reader-btn:hover {
+                    background: #f5f5f5;
+                }
+                
+                body {
+                    margin: 0 !important;
+                    padding: 60px 0 0 0 !important;
+                    background: ${getThemeBackground(settings.theme)} !important;
+                }
+            `;
+            
+            document.head.appendChild(style);
+        },
+
+        // 移除阅读模式样式
+        removeReadingMode() {
+            const style = document.getElementById('novel-reader-enhanced-styles');
+            if (style) {
+                style.remove();
+            }
+        },
+
+        // 更新UI状态
+        updateUI() {
+            if (controlPanel) {
+                const toggleItem = controlPanel.querySelector('[data-action="toggle-reading"] span');
+                if (toggleItem) {
+                    toggleItem.textContent = isReadingMode ? '退出阅读模式' : '进入阅读模式';
+                }
+            }
+        }
+    };
+
+    // 工具函数
+    function getDefaultSettings() {
+        return {
+            fontSize: 18,
+            lineHeight: 1.8,
+            theme: 'light',
+            autoScrollSpeed: 1,
+            traditionalToSimplified: false,
+            margin: 20,
+            contentWidth: 800
+        };
+    }
+
+    function getThemeBackground(theme) {
+        switch(theme) {
+            case 'dark': return '#1a1a1a';
+            case 'sepia': return '#f4ecd8';
+            case 'green': return '#e8f5e8';
+            default: return '#ffffff';
+        }
+    }
+
+    function getThemeTextColor(theme) {
+        switch(theme) {
+            case 'dark': return '#e0e0e0';
+            case 'sepia': return '#5c4b37';
+            case 'green': return '#2d5016';
+            default: return '#333333';
+        }
+    }
+
+    function getFontFamily(theme) {
+        return "'Microsoft YaHei', 'PingFang SC', 'Hiragino Sans GB', 'WenQuanYi Micro Hei', sans-serif";
+    }
+
+    // 暴露全局方法供HTML调用
+    window.novelReader = {
+        exitReadingMode: () => ReadingModeManager.exit(),
+        prevChapter: () => ChapterNavigator.navigateToChapter('prev'),
+        nextChapter: () => ChapterNavigator.navigateToChapter('next'),
+        toggleAutoScroll: () => toggleAutoScroll()
+    };
 
     // 初始化
     function init() {
-        console.log('小说阅读助手初始化');
+        console.log('小说阅读助手增强版初始化');
         
         // 加载用户设置
         loadUserSettings();
@@ -48,23 +519,17 @@
         } else {
             setupReader();
         }
+        
+        // 注册菜单命令
+        registerMenuCommands();
     }
 
     // 加载用户设置
     function loadUserSettings() {
-        const settings = GM_getValue('novelReaderSettings', {
-            fontSize: 16,
-            lineHeight: 1.6,
-            theme: 'light',
-            autoScrollSpeed: 1,
-            traditionalToSimplified: false
-        });
+        const settings = GM_getValue('novelReaderSettings', getDefaultSettings());
         
         currentScrollSpeed = settings.autoScrollSpeed;
         isTraditionalToSimplified = settings.traditionalToSimplified;
-        
-        // 应用设置
-        applyReaderSettings(settings);
     }
 
     // 保存用户设置
@@ -72,73 +537,37 @@
         GM_setValue('novelReaderSettings', settings);
     }
 
-    // 应用阅读器设置
-    function applyReaderSettings(settings) {
-        const style = document.getElementById('novel-reader-styles') || document.createElement('style');
-        style.id = 'novel-reader-styles';
+    // 注册菜单命令
+    function registerMenuCommands() {
+        // 强制启用阅读模式
+        GM_registerMenuCommand('强制阅读模式', () => {
+            ReadingModeManager.enter();
+        });
         
-        style.textContent = `
-            .novel-reader-mode body {
-                font-size: ${settings.fontSize}px !important;
-                line-height: ${settings.lineHeight} !important;
-                background-color: ${getThemeBackground(settings.theme)} !important;
-                color: ${getThemeTextColor(settings.theme)} !important;
-            }
-            
-            .novel-reader-mode * {
-                max-width: 100% !important;
-            }
-            
-            .novel-reader-content {
-                max-width: 800px !important;
-                margin: 0 auto !important;
-                padding: 20px !important;
-            }
-        `;
-        
-        document.head.appendChild(style);
-    }
-
-    // 获取主题背景色
-    function getThemeBackground(theme) {
-        switch(theme) {
-            case 'dark': return '#1a1a1a';
-            case 'sepia': return '#f4ecd8';
-            default: return '#ffffff';
-        }
-    }
-
-    // 获取主题文字颜色
-    function getThemeTextColor(theme) {
-        switch(theme) {
-            case 'dark': return '#e0e0e0';
-            case 'sepia': return '#5c4b37';
-            default: return '#333333';
-        }
+        // 重置设置
+        GM_registerMenuCommand('重置设置', () => {
+            const defaultSettings = getDefaultSettings();
+            saveUserSettings(defaultSettings);
+            alert('设置已重置为默认值');
+        });
     }
 
     // 设置阅读器
     function setupReader() {
         // 检测是否为小说页面
-        if (isNovelPage()) {
+        if (PageDetector.isNovelPage()) {
             showFloatingButton();
+            
+            // 检查是否需要恢复阅读模式
+            const lastState = GM_getValue('lastPageState');
+            if (lastState && lastState.readingModeActive && 
+                lastState.currentUrl === window.location.href) {
+                setTimeout(() => {
+                    ReadingModeManager.enter();
+                    window.scrollTo(0, lastState.scrollPosition);
+                }, 500);
+            }
         }
-    }
-
-    // 检测是否为小说页面
-    function isNovelPage() {
-        const textContent = document.body.textContent || '';
-        const novelKeywords = ['小说', '章节', '正文', '第', '章', 'novel', 'chapter'];
-        
-        // 检查页面是否包含小说相关关键词
-        const hasNovelContent = novelKeywords.some(keyword => 
-            textContent.includes(keyword)
-        );
-        
-        // 检查是否有章节导航
-        const hasChapterNav = document.querySelector('a[href*="chapter"], a[href*="章节"], .chapter-nav, .prev-next');
-        
-        return hasNovelContent || hasChapterNav;
     }
 
     // 显示悬浮按钮
@@ -153,8 +582,7 @@
             <span>阅</span>
         `;
 
-        // 根据设备类型调整按钮大小和位置
-        const isMobile = isMobileDevice();
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
         const buttonSize = isMobile ? 60 : 50;
         const buttonBottom = isMobile ? 80 : 100;
         const buttonRight = isMobile ? 15 : 20;
@@ -184,39 +612,8 @@
             -webkit-tap-highlight-color: transparent;
         `;
 
-        floatingButton.addEventListener('mouseenter', () => {
-            if (!isMobile) {
-                floatingButton.style.transform = 'scale(1.1)';
-                floatingButton.style.boxShadow = '0 6px 25px rgba(102, 126, 234, 0.6)';
-            }
-        });
-
-        floatingButton.addEventListener('mouseleave', () => {
-            if (!isMobile) {
-                floatingButton.style.transform = 'scale(1)';
-                floatingButton.style.boxShadow = '0 4px 20px rgba(102, 126, 234, 0.4)';
-            }
-        });
-
         floatingButton.addEventListener('click', showControlPanel);
-        floatingButton.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            // 添加触摸反馈
-            floatingButton.style.transform = 'scale(0.95)';
-            setTimeout(() => {
-                floatingButton.style.transform = 'scale(1)';
-            }, 150);
-            showControlPanel();
-        });
-
         document.body.appendChild(floatingButton);
-    }
-
-    // 隐藏悬浮按钮
-    function hideFloatingButton() {
-        if (floatingButton) {
-            floatingButton.style.display = 'none';
-        }
     }
 
     // 显示控制面板
@@ -237,7 +634,7 @@
                 </div>
                 
                 <div class="control-section">
-                    <div class="section-title">翻页控制</div>
+                    <div class="section-title">章节导航</div>
                     <div class="control-item" data-action="prev-chapter">
                         <span>上一章</span>
                     </div>
@@ -270,22 +667,19 @@
                     <div class="control-item" data-action="theme">
                         <span>主题</span>
                     </div>
-                    <div class="control-item" data-action="toggle-traditional">
-                        <span>${isTraditionalToSimplified ? '简体' : '繁体'}</span>
+                    <div class="control-item" data-action="content-width">
+                        <span>内容宽度</span>
+                    </div>
+                    <div class="control-item" data-action="margin">
+                        <span>边距</span>
                     </div>
                 </div>
             </div>
         `;
 
-        // 根据设备类型调整控制面板样式
-        const isMobile = isMobileDevice();
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
         const panelBottom = isMobile ? 150 : 160;
         const panelRight = isMobile ? 10 : 20;
-        const panelMinWidth = isMobile ? 'calc(100vw - 40px)' : '200px';
-        const panelMaxWidth = isMobile ? 'calc(100vw - 40px)' : '300px';
-        const panelMaxHeight = isMobile ? '60vh' : '400px';
-        const itemPadding = isMobile ? '16px 20px' : '12px 16px';
-        const itemFontSize = isMobile ? '16px' : '14px';
 
         controlPanel.style.cssText = `
             position: fixed;
@@ -295,98 +689,33 @@
             border-radius: 16px;
             padding: 16px 0;
             z-index: 10001;
-            min-width: ${panelMinWidth};
-            max-width: ${panelMaxWidth};
+            min-width: ${isMobile ? 'calc(100vw - 40px)' : '200px'};
+            max-width: ${isMobile ? 'calc(100vw - 40px)' : '300px'};
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
             backdrop-filter: blur(20px);
             display: block;
             border: 1px solid rgba(0, 0, 0, 0.1);
-            max-height: ${panelMaxHeight};
+            max-height: ${isMobile ? '60vh' : '400px'};
             overflow-y: auto;
-            touch-action: manipulation;
-            -webkit-overflow-scrolling: touch;
         `;
-
-        const content = controlPanel.querySelector('.control-panel-content');
-        content.style.cssText = `
-            color: #333;
-            font-size: 14px;
-        `;
-
-        // 样式控制部分
-        const sections = controlPanel.querySelectorAll('.control-section');
-        sections.forEach(section => {
-            section.style.cssText = `
-                margin-bottom: 12px;
-            `;
-            
-            const title = section.querySelector('.section-title');
-            title.style.cssText = `
-                padding: 8px 16px;
-                font-size: 12px;
-                color: #666;
-                font-weight: bold;
-                text-transform: uppercase;
-                letter-spacing: 0.5px;
-            `;
-        });
 
         const controlItems = controlPanel.querySelectorAll('.control-item');
         controlItems.forEach(item => {
-            const itemPadding = isMobile ? '16px 20px' : '12px 16px';
-            const itemFontSize = isMobile ? '16px' : '14px';
-            const itemMinHeight = isMobile ? '48px' : 'auto';
-            
             item.style.cssText = `
-                padding: ${itemPadding};
+                padding: 12px 16px;
                 cursor: pointer;
                 transition: all 0.2s;
                 border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                font-size: ${itemFontSize};
+                font-size: 14px;
                 display: flex;
                 align-items: center;
                 justify-content: space-between;
-                min-height: ${itemMinHeight};
-                touch-action: manipulation;
-                -webkit-tap-highlight-color: transparent;
             `;
-            
-            // 鼠标悬停效果（仅非移动设备）
-            if (!isMobile) {
-                item.addEventListener('mouseenter', () => {
-                    item.style.background = 'rgba(102, 126, 234, 0.1)';
-                    item.style.color = '#667eea';
-                });
-                
-                item.addEventListener('mouseleave', () => {
-                    item.style.background = 'transparent';
-                    item.style.color = '#333';
-                });
-            }
-            
-            // 点击事件
+
             item.addEventListener('click', (e) => {
                 e.stopPropagation();
                 handleControlAction(item.getAttribute('data-action'));
             });
-            
-            // 触摸事件（移动设备优化）
-            item.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                // 添加触摸反馈
-                item.style.background = 'rgba(102, 126, 234, 0.15)';
-                setTimeout(() => {
-                    item.style.background = 'transparent';
-                }, 200);
-                handleControlAction(item.getAttribute('data-action'));
-            });
-        });
-
-        // 移除最后一个项目的边框
-        const lastItems = controlPanel.querySelectorAll('.control-section .control-item:last-child');
-        lastItems.forEach(item => {
-            item.style.borderBottom = 'none';
         });
 
         document.body.appendChild(controlPanel);
@@ -411,10 +740,10 @@
                 toggleReadingMode();
                 break;
             case 'prev-chapter':
-                navigateToPrevChapter();
+                ChapterNavigator.navigateToChapter('prev');
                 break;
             case 'next-chapter':
-                navigateToNextChapter();
+                ChapterNavigator.navigateToChapter('next');
                 break;
             case 'show-toc':
                 showTableOfContents();
@@ -434,8 +763,11 @@
             case 'theme':
                 showThemeSelector();
                 break;
-            case 'toggle-traditional':
-                toggleTraditionalSimplified();
+            case 'content-width':
+                showContentWidthSelector();
+                break;
+            case 'margin':
+                showMarginSelector();
                 break;
         }
         hideControlPanel();
@@ -443,128 +775,10 @@
 
     // 切换阅读模式
     function toggleReadingMode() {
-        isReadingMode = !isReadingMode;
-        
         if (isReadingMode) {
-            enterReadingMode();
+            ReadingModeManager.exit();
         } else {
-            exitReadingMode();
-        }
-        
-        // 更新控制面板
-        if (controlPanel) {
-            const toggleItem = controlPanel.querySelector('[data-action="toggle-reading"] span');
-            if (toggleItem) {
-                toggleItem.textContent = isReadingMode ? '退出阅读模式' : '进入阅读模式';
-            }
-        }
-    }
-
-    // 进入阅读模式
-    function enterReadingMode() {
-        document.documentElement.classList.add('novel-reader-mode');
-        
-        // 提取主要内容
-        const content = extractMainContent();
-        if (content) {
-            content.classList.add('novel-reader-content');
-        }
-        
-        // 隐藏干扰元素
-        hideDistractingElements();
-    }
-
-    // 退出阅读模式
-    function exitReadingMode() {
-        document.documentElement.classList.remove('novel-reader-mode');
-        
-        // 显示隐藏的元素
-        showDistractingElements();
-    }
-
-    // 提取主要内容
-    function extractMainContent() {
-        // 常见的小说内容选择器
-        const contentSelectors = [
-            '.content', '.chapter-content', '.novel-content',
-            '.article-content', '.text-content', '#content',
-            '.read-content', '.chapter-text', '.article-text'
-        ];
-        
-        for (const selector of contentSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent.length > 500) {
-                return element;
-            }
-        }
-        
-        // 如果没有找到明确的内容区域，使用body
-        return document.body;
-    }
-
-    // 隐藏干扰元素
-    function hideDistractingElements() {
-        const distractingSelectors = [
-            'header', 'footer', 'nav', '.header', '.footer', '.nav',
-            '.advertisement', '.ad', '.sidebar', '.comment',
-            '.social-share', '.related-posts'
-        ];
-        
-        distractingSelectors.forEach(selector => {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(element => {
-                element.style.display = 'none';
-            });
-        });
-    }
-
-    // 显示干扰元素
-    function showDistractingElements() {
-        const distractingSelectors = [
-            'header', 'footer', 'nav', '.header', '.footer', '.nav',
-            '.advertisement', '.ad', '.sidebar', '.comment',
-            '.social-share', '.related-posts'
-        ];
-        
-        distractingSelectors.forEach(selector => {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(element => {
-                element.style.display = '';
-            });
-        });
-    }
-
-    // 导航到上一章
-    function navigateToPrevChapter() {
-        const prevLinks = [
-            document.querySelector('a[href*="prev"]'),
-            document.querySelector('a[href*="上一"]'),
-            document.querySelector('a[href*="前"]'),
-            document.querySelector('.prev-chapter'),
-            document.querySelector('.chapter-prev')
-        ].filter(link => link);
-        
-        if (prevLinks.length > 0) {
-            prevLinks[0].click();
-        } else {
-            alert('未找到上一章链接');
-        }
-    }
-
-    // 导航到下一章
-    function navigateToNextChapter() {
-        const nextLinks = [
-            document.querySelector('a[href*="next"]'),
-            document.querySelector('a[href*="下一"]'),
-            document.querySelector('a[href*="后"]'),
-            document.querySelector('.next-chapter'),
-            document.querySelector('.chapter-next')
-        ].filter(link => link);
-        
-        if (nextLinks.length > 0) {
-            nextLinks[0].click();
-        } else {
-            alert('未找到下一章链接');
+            ReadingModeManager.enter();
         }
     }
 
@@ -592,19 +806,11 @@
         } else {
             startAutoScroll();
         }
-        
-        // 更新控制面板
-        if (controlPanel) {
-            const autoItem = controlPanel.querySelector('[data-action="auto-scroll"] span');
-            if (autoItem) {
-                autoItem.textContent = autoScrollInterval ? '停止自动' : '开始自动';
-            }
-        }
     }
 
     // 开始自动滚动
     function startAutoScroll() {
-        const speed = 50 / currentScrollSpeed; // 速度越快，间隔越小
+        const speed = 50 / currentScrollSpeed;
         
         autoScrollInterval = setInterval(() => {
             window.scrollBy(0, 1);
@@ -612,8 +818,9 @@
             // 检查是否到达页面底部
             if ((window.innerHeight + window.pageYOffset) >= document.body.offsetHeight - 10) {
                 // 到达底部，尝试翻页
-                navigateToNextChapter();
-                stopAutoScroll();
+                if (ChapterNavigator.navigateToChapter('next')) {
+                    stopAutoScroll();
+                }
             }
         }, speed);
     }
@@ -628,264 +835,118 @@
 
     // 显示速度选择器
     function showSpeedSelector() {
-        let selector = document.getElementById('speed-selector');
-        if (selector) {
-            selector.style.display = 'flex';
-            return;
-        }
-
-        selector = document.createElement('div');
-        selector.id = 'speed-selector';
-        selector.innerHTML = `
-            <div class="selector-content">
-                <div class="selector-header">
-                    <span>滚动速度</span>
-                </div>
-                <div class="selector-options">
-                    ${CONFIG.autoScrollSpeed.map(speed => `
-                        <div class="option" data-speed="${speed}">
-                            <span>${speed}x</span>
-                            ${speed === currentScrollSpeed ? '<span class="selected">✓</span>' : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        selector.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 16px;
-            padding: 0;
-            z-index: 10002;
-            min-width: 150px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(20px);
-            display: flex;
-            flex-direction: column;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-        `;
-
-        const content = selector.querySelector('.selector-content');
-        content.style.cssText = `
-            color: #333;
-        `;
-
-        const header = selector.querySelector('.selector-header');
-        header.style.cssText = `
-            padding: 16px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            font-weight: bold;
-            font-size: 16px;
-            text-align: center;
-        `;
-
-        const options = selector.querySelector('.selector-options');
-        options.style.cssText = `
-            max-height: 300px;
-            overflow-y: auto;
-        `;
-
-        const optionElements = selector.querySelectorAll('.option');
-        optionElements.forEach(option => {
-            option.style.cssText = `
-                padding: 12px 16px;
-                cursor: pointer;
-                transition: all 0.2s;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                font-size: 14px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            `;
-
-            option.addEventListener('mouseenter', () => {
-                option.style.background = 'rgba(102, 126, 234, 0.1)';
-            });
-
-            option.addEventListener('mouseleave', () => {
-                option.style.background = 'transparent';
-            });
-
-            option.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const speed = parseFloat(option.getAttribute('data-speed'));
-                currentScrollSpeed = speed;
-                
-                // 更新设置
-                const settings = GM_getValue('novelReaderSettings', {});
-                settings.autoScrollSpeed = speed;
-                saveUserSettings(settings);
-                
-                // 更新控制面板显示
-                if (controlPanel) {
-                    const speedItem = controlPanel.querySelector('[data-action="speed-control"] span');
-                    if (speedItem) {
-                        speedItem.textContent = `速度: ${speed}x`;
-                    }
-                }
-                
-                selector.style.display = 'none';
-            });
+        showGenericSelector('speed', CONFIG.autoScrollSpeed, currentScrollSpeed, (speed) => {
+            currentScrollSpeed = speed;
+            const settings = GM_getValue('novelReaderSettings', {});
+            settings.autoScrollSpeed = speed;
+            saveUserSettings(settings);
         });
-
-        // 移除最后一个选项的边框
-        optionElements[optionElements.length - 1].style.borderBottom = 'none';
-
-        document.body.appendChild(selector);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', (e) => {
-                if (!selector.contains(e.target)) {
-                    selector.style.display = 'none';
-                }
-            }, { once: true });
-        }, 100);
     }
 
     // 显示字体大小选择器
     function showFontSizeSelector() {
-        let selector = document.getElementById('font-size-selector');
-        if (selector) {
-            selector.style.display = 'flex';
-            return;
-        }
-
         const settings = GM_getValue('novelReaderSettings', {});
-        const currentSize = settings.fontSize || 16;
-
-        selector = document.createElement('div');
-        selector.id = 'font-size-selector';
-        selector.innerHTML = `
-            <div class="selector-content">
-                <div class="selector-header">
-                    <span>字体大小</span>
-                </div>
-                <div class="selector-options">
-                    ${CONFIG.fontSize.map(size => `
-                        <div class="option" data-size="${size}">
-                            <span style="font-size: ${size}px">示例文字</span>
-                            ${size === currentSize ? '<span class="selected">✓</span>' : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        selector.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 16px;
-            padding: 0;
-            z-index: 10002;
-            min-width: 180px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(20px);
-            display: flex;
-            flex-direction: column;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-        `;
-
-        const content = selector.querySelector('.selector-content');
-        content.style.cssText = `
-            color: #333;
-        `;
-
-        const header = selector.querySelector('.selector-header');
-        header.style.cssText = `
-            padding: 16px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            font-weight: bold;
-            font-size: 16px;
-            text-align: center;
-        `;
-
-        const options = selector.querySelector('.selector-options');
-        options.style.cssText = `
-            max-height: 300px;
-            overflow-y: auto;
-        `;
-
-        const optionElements = selector.querySelectorAll('.option');
-        optionElements.forEach(option => {
-            option.style.cssText = `
-                padding: 12px 16px;
-                cursor: pointer;
-                transition: all 0.2s;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                font-size: 14px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            `;
-
-            option.addEventListener('mouseenter', () => {
-                option.style.background = 'rgba(102, 126, 234, 0.1)';
-            });
-
-            option.addEventListener('mouseleave', () => {
-                option.style.background = 'transparent';
-            });
-
-            option.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const size = parseInt(option.getAttribute('data-size'));
-                
-                // 更新设置
-                const settings = GM_getValue('novelReaderSettings', {});
-                settings.fontSize = size;
-                saveUserSettings(settings);
-                applyReaderSettings(settings);
-                
-                selector.style.display = 'none';
-            });
+        const currentSize = settings.fontSize || 18;
+        
+        showGenericSelector('font-size', CONFIG.fontSize, currentSize, (size) => {
+            const settings = GM_getValue('novelReaderSettings', {});
+            settings.fontSize = size;
+            saveUserSettings(settings);
+            if (isReadingMode) {
+                ReadingModeManager.applyReadingMode();
+            }
         });
-
-        // 移除最后一个选项的边框
-        optionElements[optionElements.length - 1].style.borderBottom = 'none';
-
-        document.body.appendChild(selector);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', (e) => {
-                if (!selector.contains(e.target)) {
-                    selector.style.display = 'none';
-                }
-            }, { once: true });
-        }, 100);
     }
 
     // 显示行高选择器
     function showLineHeightSelector() {
-        let selector = document.getElementById('line-height-selector');
+        const settings = GM_getValue('novelReaderSettings', {});
+        const currentHeight = settings.lineHeight || 1.8;
+        
+        showGenericSelector('line-height', CONFIG.lineHeight, currentHeight, (height) => {
+            const settings = GM_getValue('novelReaderSettings', {});
+            settings.lineHeight = height;
+            saveUserSettings(settings);
+            if (isReadingMode) {
+                ReadingModeManager.applyReadingMode();
+            }
+        });
+    }
+
+    // 显示主题选择器
+    function showThemeSelector() {
+        const settings = GM_getValue('novelReaderSettings', {});
+        const currentTheme = settings.theme || 'light';
+        
+        showGenericSelector('theme', CONFIG.theme, currentTheme, (theme) => {
+            const settings = GM_getValue('novelReaderSettings', {});
+            settings.theme = theme;
+            saveUserSettings(settings);
+            if (isReadingMode) {
+                ReadingModeManager.applyReadingMode();
+            }
+        });
+    }
+
+    // 显示内容宽度选择器
+    function showContentWidthSelector() {
+        const settings = GM_getValue('novelReaderSettings', {});
+        const currentWidth = settings.contentWidth || 800;
+        
+        showGenericSelector('content-width', CONFIG.contentWidth, currentWidth, (width) => {
+            const settings = GM_getValue('novelReaderSettings', {});
+            settings.contentWidth = width;
+            saveUserSettings(settings);
+            if (isReadingMode) {
+                ReadingModeManager.applyReadingMode();
+            }
+        });
+    }
+
+    // 显示边距选择器
+    function showMarginSelector() {
+        const settings = GM_getValue('novelReaderSettings', {});
+        const currentMargin = settings.margin || 20;
+        
+        showGenericSelector('margin', CONFIG.margin, currentMargin, (margin) => {
+            const settings = GM_getValue('novelReaderSettings', {});
+            settings.margin = margin;
+            saveUserSettings(settings);
+            if (isReadingMode) {
+                ReadingModeManager.applyReadingMode();
+            }
+        });
+    }
+
+    // 通用选择器显示函数
+    function showGenericSelector(type, options, currentValue, callback) {
+        let selector = document.getElementById(`${type}-selector`);
         if (selector) {
             selector.style.display = 'flex';
             return;
         }
 
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentHeight = settings.lineHeight || 1.6;
+        const typeNames = {
+            'speed': '滚动速度',
+            'font-size': '字体大小',
+            'line-height': '行高',
+            'theme': '主题',
+            'content-width': '内容宽度',
+            'margin': '边距'
+        };
 
         selector = document.createElement('div');
-        selector.id = 'line-height-selector';
+        selector.id = `${type}-selector`;
         selector.innerHTML = `
             <div class="selector-content">
                 <div class="selector-header">
-                    <span>行高</span>
+                    <span>${typeNames[type]}</span>
                 </div>
                 <div class="selector-options">
-                    ${CONFIG.lineHeight.map(height => `
-                        <div class="option" data-height="${height}">
-                            <span style="line-height: ${height}">示例文字<br>第二行</span>
-                            ${height === currentHeight ? '<span class="selected">✓</span>' : ''}
+                    ${options.map(option => `
+                        <div class="option" data-value="${option}">
+                            <span>${getOptionDisplayText(type, option)}</span>
+                            ${option === currentValue ? '<span class="selected">✓</span>' : ''}
                         </div>
                     `).join('')}
                 </div>
@@ -909,26 +970,6 @@
             border: 1px solid rgba(0, 0, 0, 0.1);
         `;
 
-        const content = selector.querySelector('.selector-content');
-        content.style.cssText = `
-            color: #333;
-        `;
-
-        const header = selector.querySelector('.selector-header');
-        header.style.cssText = `
-            padding: 16px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            font-weight: bold;
-            font-size: 16px;
-            text-align: center;
-        `;
-
-        const options = selector.querySelector('.selector-options');
-        options.style.cssText = `
-            max-height: 300px;
-            overflow-y: auto;
-        `;
-
         const optionElements = selector.querySelectorAll('.option');
         optionElements.forEach(option => {
             option.style.cssText = `
@@ -942,30 +983,15 @@
                 align-items: center;
             `;
 
-            option.addEventListener('mouseenter', () => {
-                option.style.background = 'rgba(102, 126, 234, 0.1)';
-            });
-
-            option.addEventListener('mouseleave', () => {
-                option.style.background = 'transparent';
-            });
-
             option.addEventListener('click', (e) => {
                 e.stopPropagation();
-                const height = parseFloat(option.getAttribute('data-height'));
-                
-                // 更新设置
-                const settings = GM_getValue('novelReaderSettings', {});
-                settings.lineHeight = height;
-                saveUserSettings(settings);
-                applyReaderSettings(settings);
-                
+                const value = type === 'font-size' || type === 'content-width' || type === 'margin' ? 
+                    parseInt(option.getAttribute('data-value')) : 
+                    parseFloat(option.getAttribute('data-value'));
+                callback(value);
                 selector.style.display = 'none';
             });
         });
-
-        // 移除最后一个选项的边框
-        optionElements[optionElements.length - 1].style.borderBottom = 'none';
 
         document.body.appendChild(selector);
 
@@ -979,120 +1005,24 @@
         }, 100);
     }
 
-    // 显示主题选择器
-    function showThemeSelector() {
-        let selector = document.getElementById('theme-selector');
-        if (selector) {
-            selector.style.display = 'flex';
-            return;
+    // 获取选项显示文本
+    function getOptionDisplayText(type, value) {
+        switch(type) {
+            case 'speed':
+                return `${value}x`;
+            case 'font-size':
+                return `${value}px`;
+            case 'line-height':
+                return value.toString();
+            case 'theme':
+                return getThemeName(value);
+            case 'content-width':
+                return `${value}px`;
+            case 'margin':
+                return `${value}px`;
+            default:
+                return value.toString();
         }
-
-        const settings = GM_getValue('novelReaderSettings', {});
-        const currentTheme = settings.theme || 'light';
-
-        selector = document.createElement('div');
-        selector.id = 'theme-selector';
-        selector.innerHTML = `
-            <div class="selector-content">
-                <div class="selector-header">
-                    <span>主题</span>
-                </div>
-                <div class="selector-options">
-                    ${CONFIG.theme.map(theme => `
-                        <div class="option" data-theme="${theme}">
-                            <span>${getThemeName(theme)}</span>
-                            ${theme === currentTheme ? '<span class="selected">✓</span>' : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-
-        selector.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(255, 255, 255, 0.98);
-            border-radius: 16px;
-            padding: 0;
-            z-index: 10002;
-            min-width: 120px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(20px);
-            display: flex;
-            flex-direction: column;
-            border: 1px solid rgba(0, 0, 0, 0.1);
-        `;
-
-        const content = selector.querySelector('.selector-content');
-        content.style.cssText = `
-            color: #333;
-        `;
-
-        const header = selector.querySelector('.selector-header');
-        header.style.cssText = `
-            padding: 16px;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-            font-weight: bold;
-            font-size: 16px;
-            text-align: center;
-        `;
-
-        const options = selector.querySelector('.selector-options');
-        options.style.cssText = `
-            max-height: 300px;
-            overflow-y: auto;
-        `;
-
-        const optionElements = selector.querySelectorAll('.option');
-        optionElements.forEach(option => {
-            option.style.cssText = `
-                padding: 12px 16px;
-                cursor: pointer;
-                transition: all 0.2s;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-                font-size: 14px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            `;
-
-            option.addEventListener('mouseenter', () => {
-                option.style.background = 'rgba(102, 126, 234, 0.1)';
-            });
-
-            option.addEventListener('mouseleave', () => {
-                option.style.background = 'transparent';
-            });
-
-            option.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const theme = option.getAttribute('data-theme');
-                
-                // 更新设置
-                const settings = GM_getValue('novelReaderSettings', {});
-                settings.theme = theme;
-                saveUserSettings(settings);
-                applyReaderSettings(settings);
-                
-                selector.style.display = 'none';
-            });
-        });
-
-        // 移除最后一个选项的边框
-        optionElements[optionElements.length - 1].style.borderBottom = 'none';
-
-        document.body.appendChild(selector);
-
-        // 点击外部关闭
-        setTimeout(() => {
-            document.addEventListener('click', (e) => {
-                if (!selector.contains(e.target)) {
-                    selector.style.display = 'none';
-                }
-            }, { once: true });
-        }, 100);
     }
 
     // 获取主题名称
@@ -1101,63 +1031,8 @@
             case 'light': return '浅色';
             case 'dark': return '深色';
             case 'sepia': return '护眼';
+            case 'green': return '绿色';
             default: return theme;
-        }
-    }
-
-    // 切换繁简体
-    function toggleTraditionalSimplified() {
-        isTraditionalToSimplified = !isTraditionalToSimplified;
-        
-        // 更新设置
-        const settings = GM_getValue('novelReaderSettings', {});
-        settings.traditionalToSimplified = isTraditionalToSimplified;
-        saveUserSettings(settings);
-        
-        // 更新控制面板显示
-        if (controlPanel) {
-            const toggleItem = controlPanel.querySelector('[data-action="toggle-traditional"] span');
-            if (toggleItem) {
-                toggleItem.textContent = isTraditionalToSimplified ? '简体' : '繁体';
-            }
-        }
-        
-        // 应用繁简体转换
-        if (isTraditionalToSimplified) {
-            convertTraditionalToSimplified();
-        } else {
-            // 恢复原始文本（需要重新加载页面或保存原始文本）
-            location.reload();
-        }
-    }
-
-    // 繁体转简体
-    function convertTraditionalToSimplified() {
-        // 简繁对照表（简化版）
-        const traditionalToSimplified = {
-            '臺': '台', '灣': '湾', '國': '国', '體': '体', '電': '电',
-            '腦': '脑', '網': '网', '絡': '络', '頁': '页', '麵': '面',
-            '線': '线', '機': '机', '關': '关', '開': '开', '關': '关',
-            '門': '门', '間': '间', '陽': '阳', '陰': '阴', '風': '风',
-            '雲': '云', '雨': '雨', '雪': '雪', '雷': '雷', '電': '电'
-            // 这里应该包含完整的简繁对照表，但为了简洁只列出一部分
-        };
-        
-        // 转换页面文本
-        const walker = document.createTreeWalker(
-            document.body,
-            NodeFilter.SHOW_TEXT,
-            null,
-            false
-        );
-        
-        let node;
-        while (node = walker.nextNode()) {
-            let text = node.textContent;
-            for (const [traditional, simplified] of Object.entries(traditionalToSimplified)) {
-                text = text.replace(new RegExp(traditional, 'g'), simplified);
-            }
-            node.textContent = text;
         }
     }
 
