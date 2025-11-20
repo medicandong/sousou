@@ -62,7 +62,7 @@
     if (/^www\.google\./.test(h)) return 'google';
     if (/bing\.(com|cn)/.test(h)) return 'bing';
     if (/yandex\.(com|ru)/.test(h)) return 'yandex';
-    if (/duckduckgo\.com/.test(h)) return 'duckduckgo';
+    if (/metaso\.cn/.test(h)) return 'metaso';
     return '';
   }
 
