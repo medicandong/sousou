@@ -207,7 +207,7 @@
   }
 
   function init() {
-    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'duckduckgo']);
+    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'metaso']);
     const style = document.createElement('style');
     style.textContent = STYLE;
     document.head.appendChild(style);
