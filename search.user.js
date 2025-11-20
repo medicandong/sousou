@@ -43,11 +43,15 @@
       searchUrl: 'https://yandex.com/search/?text={q}'
     },
     {
-      key: 'duckduckgo',
-      name: 'DuckDuckGo',
-      logo: 'https://duckduckgo.com/favicon.ico',
-      searchUrl: 'https://duckduckgo.com/?q={q}'
-    }
+    key: 'metaso',
+    name: 'Metaso',
+    logo: 'https://metaso.cn/favicon.ico',   // 秘塔的 favicon（可自行替换为更合适的图标）
+    searchUrl: 'https://metaso.cn/?q={q}',
+    mirrors: [
+      // 如需国内镜像或备用地址，可在此添加
+      // 示例：'https://cn.metaso.cn/?q={q}'
+    ]
+  }
   ];
 
   const $ = (s, el) => (el || document).querySelector(s);
