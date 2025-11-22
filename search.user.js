@@ -47,7 +47,7 @@
       key: 'metaso',
       name: 'Metaso',
       logo: 'https://metaso.cn/favicon.ico',
-      searchUrl: 'https://metaso.cn/?q={q}'
+      searchUrl: 'https://metaso.cn/#/search?q={q}'
     }
   ];
 
