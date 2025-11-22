@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         手机端快捷搜索助手（油猴干净版）
 // @namespace    https://github.com/yourname
-// @version      1.6.1 // 版本号增加，方便识别修改
+// @version      1.6.2 // 再次修改版本号
 // @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
@@ -14,7 +14,6 @@
 (function () {
   'use strict';
 
-  // --- 1. 搜索引擎数据库 (Metaso已添加，DuckDuckGo已移除) ---
   const ENGINE_DB = [
     {
       key: 'google',
@@ -50,7 +49,6 @@
       searchUrl: 'https://metaso.cn/?q={q}',
       mirrors: [
         // 如需国内镜像或备用地址，可在此添加
-        // 示例：'https://cn.metaso.cn/?q={q}'
       ]
     }
   ];
@@ -58,13 +56,12 @@
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => [...(el || document).querySelectorAll(s)];
 
-  // --- 2. 核心函数修改：Metaso 检测逻辑添加 ---
   function detectCurrentEngine() {
     const h = location.hostname;
     if (/^www\.google\./.test(h)) return 'google';
     if (/bing\.(com|cn)/.test(h)) return 'bing';
     if (/yandex\.(com|ru)/.test(h)) return 'yandex';
-    if (/metaso\.cn/.test(h)) return 'metaso'; // 添加 Metaso 的主机名检测
+    if (/metaso\.cn/.test(h)) return 'metaso';
     return '';
   }
 
@@ -92,12 +89,13 @@
     $$('body *').forEach(el => walk(el));
   }
 
+  // >>>>>>>>> 核心样式修改：为 img 添加 !important 修复图标大小 <<<<<<<<<<
   const STYLE = `
   #quickEngineBar{position:relative;margin:8px 0 12px;display:flex;gap:10px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;}
   #quickEngineBar::-webkit-scrollbar{height:4px;}
   #quickEngineBar::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px;}
   .qe-btn{flex:0 0 auto;display:flex;align-items:center;background:#fff;border:1px solid #dfe1e5;border-radius:20px;padding:6px 10px;font-size:14px;color:#202124;text-decoration:none;white-space:nowrap;}
-  .qe-btn img{width:16px;height:16px;margin-right:6px;}
+  .qe-btn img{width:16px !important;height:16px !important;margin-right:6px;} 
   .qe-btn:active{background:#f1f3f4;}
   #qeSettings{position:fixed;top:10px;right:10px;z-index:9999;background:#fff;border:1px solid #dadce0;border-radius:8px;padding:12px;width:260px;box-shadow:0 4px 12px rgba(0,0,0,.15);font-size:14px;display:none;}
   #qeSettings h4{margin:0 0 8px;font-size:16px;}
@@ -105,12 +103,12 @@
   #qeSettings input[type=text]{width:100%;padding:4px 6px;margin-top:4px;}
   #qeSettings button{margin-top:8px;margin-right:6px;}
   `;
+  // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
   function buildBar() {
     const kw = getQuery();
     if (!kw) return;
     const current = detectCurrentEngine();
-    // --- 3. 默认引擎列表修改：将 'duckduckgo' 替换为 'metaso' ---
     const selectedKeys = GM_getValue('selectedEngines', ['google', 'bing', 'yandex', 'metaso']);
     const customEngines = GM_getValue('customEngines', []);
     const all = [...ENGINE_DB, ...customEngines];
@@ -179,7 +177,6 @@
     document.body.appendChild(panel);
 
     function renderList() {
-      // --- 4. 设置面板默认选中列表修改：将 'duckduckgo' 替换为 'metaso' ---
       const selected = GM_getValue('selectedEngines', ['google', 'bing', 'yandex', 'metaso']);
       const customEngines = GM_getValue('customEngines', []);
       const all = [...ENGINE_DB, ...customEngines];
@@ -211,7 +208,6 @@
   }
 
   function init() {
-    // --- 5. 初始化默认值修改：将 'duckduckgo' 替换为 'metaso' ---
     if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'metaso']);
     const style = document.createElement('style');
     style.textContent = STYLE;
