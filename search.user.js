@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         手机端快捷搜索助手（油猴干净版）
 // @namespace    https://github.com/yourname
-// @version      1.6.3
+// @version      1.7
 // @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
@@ -236,15 +236,27 @@
   }
 
   /* ========== 8. 初始化 ========== */
-  function init() {
-    /* 首次安装默认即包含 metaso */
-    if (!GM_getValue('selectedEngines')) GM_setValue('selectedEngines', ['google', 'bing', 'yandex', 'metaso']);
-    const style = document.createElement('style');
-    style.textContent = STYLE;
-    document.head.appendChild(style);
-    keepBarAlive();
-    GM_registerMenuCommand('⚙️ 搜索引擎设置', openSettings);
+function init() {
+  /* 0. 先保证本地一定包含 metaso，避免旧缓存漏项 */
+  const DEF = ['google', 'bing', 'yandex', 'metaso'];
+  const old = GM_getValue('selectedEngines', []);
+  if (!old.includes('metaso')) {
+    GM_setValue('selectedEngines', Array.from(new Set([...old, ...DEF])));
   }
 
-  init();
-})();
+  /* 1. 首次安装默认即包含 metaso（仅用于全新用户） */
+  if (!GM_getValue('selectedEngines')) {
+    GM_setValue('selectedEngines', DEF);
+  }
+
+  /* 2. 注入样式 */
+  const style = document.createElement('style');
+  style.textContent = STYLE;
+  document.head.appendChild(style);
+
+  /* 3. 启动常驻逻辑 & 菜单 */
+  keepBarAlive();
+  GM_registerMenuCommand('⚙️ 搜索引擎设置', openSettings);
+}
+
+init();
