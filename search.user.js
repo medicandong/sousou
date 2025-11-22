@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         手机端快捷搜索助手（油猴干净版）
 // @namespace    https://github.com/yourname
-// @version      1.8
+// @version      2.0
 // @description  搜索框下方永远显示另外3个引擎 / 关键词高亮 / 可视化设置
 // @author       You
 // @match        *://*/*
